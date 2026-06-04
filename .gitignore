@@ -1,0 +1,13 @@
+*.ioc
+.mxproject
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvoptx
+MDK-ARM/DebugConfig/
+MDK-ARM/RTE/
+MDK-ARM/XY_Platform_Motion_Control/
+__pycache__/
+*.pyc
+*.lst
+gui/apikey.txt
+gui/ai_response.json
+gui/ai_request.txt
