@@ -8,6 +8,7 @@ import logging
 import os
 import json
 import urllib.request
+import traceback
 from datetime import datetime
 from typing import Optional
 from collections import deque
@@ -1187,24 +1188,35 @@ class MainWindow(QMainWindow):
 
     def _on_start_writing(self):
         """执行 G-code 写字"""
-        if not self._last_gcode_text:
-            self.signal_emitter.log_message.emit("G-code: 请先生成 G 代码")
-            return
-        if not self.comm.is_connected():
-            self.signal_emitter.log_message.emit("G-code: 请先连接设备")
-            return
+        try:
+            if not self._last_gcode_text:
+                self.signal_emitter.log_message.emit("G-code: 请先生成 G 代码")
+                return
+            if not self.comm.is_connected():
+                self.signal_emitter.log_message.emit("G-code: 请先连接设备")
+                return
 
-        self.writing_active = True
-        self.gcode_status_label.setText("写字中...")
-        self.signal_emitter.log_message.emit("G-code: 开始执行写字任务...")
-        finished = self._execute_gcode(self._last_gcode_text)
-        self.writing_active = False
-        if finished:
-            self.gcode_status_label.setText("完成")
-            self.signal_emitter.log_message.emit("G-code: 写字任务执行完成")
-        else:
-            self.gcode_status_label.setText("中断")
-            self.signal_emitter.log_message.emit("G-code: 写字任务中断")
+            self.writing_active = True
+            self.gcode_status_label.setText("写字中...")
+            self.signal_emitter.log_message.emit("G-code: 开始执行写字任务...")
+            finished = self._execute_gcode(self._last_gcode_text)
+            self.writing_active = False
+            if finished:
+                self.gcode_status_label.setText("完成")
+                self.signal_emitter.log_message.emit("G-code: 写字任务执行完成")
+            else:
+                self.gcode_status_label.setText("中断")
+                self.signal_emitter.log_message.emit("G-code: 写字任务中断")
+        except Exception:
+            self.writing_active = False
+            self.gcode_status_label.setText("崩溃")
+            crash_path = os.path.join(os.path.dirname(__file__), "crash.log")
+            with open(crash_path, "a", encoding="utf-8") as f:
+                f.write(f"\n=== {datetime.now()} ===\n")
+                traceback.print_exc(file=f)
+            self.signal_emitter.error_occurred.emit(
+                f"G-code 执行崩溃，详见 crash.log\n{traceback.format_exc()[:500]}"
+            )
 
     def _on_stop_writing(self):
         """停止 G-code 写字"""
@@ -1795,6 +1807,15 @@ class MainWindow(QMainWindow):
 
 
 def main():
+    import traceback as _tb
+    def _global_excepthook(etype, value, tb):
+        crash_path = os.path.join(os.path.dirname(__file__), "crash.log")
+        with open(crash_path, "a", encoding="utf-8") as f:
+            f.write(f"\n=== CRASH {datetime.now()} ===\n")
+            _tb.print_exception(etype, value, tb, file=f)
+        sys.__excepthook__(etype, value, tb)
+    sys.excepthook = _global_excepthook
+
     app = __import__('PyQt5.QtWidgets', fromlist=['QApplication']).QApplication(sys.argv)
     
     window = MainWindow()
