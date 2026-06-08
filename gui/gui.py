@@ -5,6 +5,9 @@ PyQt5 图形界面主窗口 - 美化版本，带 XY 平台坐标图
 import sys
 import math
 import logging
+import os
+import json
+import urllib.request
 from datetime import datetime
 from typing import Optional
 from collections import deque
