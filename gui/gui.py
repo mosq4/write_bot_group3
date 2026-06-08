@@ -1280,7 +1280,7 @@ class MainWindow(QMainWindow):
                     current_x, current_y = target_x, target_y
                     continue
 
-                move_speed = max(0.5, current_feedrate / 60.0)
+                move_speed = int(max(1, current_feedrate / 60.0))
                 total_motion += 1
 
                 if cmd in ('G2', 'G3'):

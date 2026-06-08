@@ -102,8 +102,7 @@ void Error_Handler(void);
 #define SW1_EXTI_IRQn EXTI1_IRQn
 
 /* USER CODE BEGIN Private defines */
-#define PEN_Pin GPIO_PIN_5
-#define PEN_GPIO_Port GPIOE
+
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus
