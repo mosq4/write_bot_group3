@@ -117,11 +117,24 @@ class XYPlotCanvas(FigureCanvas):
         """更新当前位置"""
         self.current_point.set_data([x], [y])
         
-        # 添加到轨迹
-        if not self.trajectory_x or abs(x - self.trajectory_x[-1]) > 0.1 or abs(y - self.trajectory_y[-1]) > 0.1:
+        # 添加到轨迹（跳过预览插入的 None 断点）
+        last_x = None
+        last_y = None
+        for lx in reversed(self.trajectory_x):
+            if lx is not None:
+                last_x = lx
+                break
+        for ly in reversed(self.trajectory_y):
+            if ly is not None:
+                last_y = ly
+                break
+        if last_x is None or abs(x - last_x) > 0.1 or abs(y - last_y) > 0.1:
             self.trajectory_x.append(x)
             self.trajectory_y.append(y)
-            self.trajectory_line.set_data(list(self.trajectory_x), list(self.trajectory_y))
+            self.trajectory_line.set_data(
+                [v for v in self.trajectory_x if v is not None],
+                [v for v in self.trajectory_y if v is not None]
+            )
         
         self._apply_plot_bounds()
         self.draw_idle()
