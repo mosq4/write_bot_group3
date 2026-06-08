@@ -57,32 +57,24 @@ class XYPlotCanvas(FigureCanvas):
         super().__init__(self.fig)
         self.setParent(parent)
 
-        # 使用简洁默认样式，避免字体和样式兼容问题
         self.ax.grid(True, linestyle='--', alpha=0.4)
         self.ax.set_xlabel('X (mm)')
         self.ax.set_ylabel('Y (mm)')
         self.ax.set_title('XY Real-time Position')
         
-        # 初始化
         self._apply_plot_bounds()
-        # 强制 X/Y 等比例显示，避免窗口拉伸导致轨迹形变
         self.ax.set_aspect('equal', adjustable='box')
         
-        # 绘制工作区域边界
         self._draw_workspace()
         
-        # 轨迹记录
         self.trajectory_x = deque(maxlen=500)
         self.trajectory_y = deque(maxlen=500)
         self.trajectory_line, = self.ax.plot([], [], 'o-', color='tab:blue', markersize=2, linewidth=1, alpha=0.7)
         
-        # 当前位置点
         self.current_point, = self.ax.plot([], [], 'o', color='tab:red', markersize=10, label='Current')
         
-        # 目标位置点
         self.target_point, = self.ax.plot([], [], 's', color='tab:green', markersize=8, label='Target', alpha=0.7)
         
-        # 图例
         self.ax.legend(loc='upper right')
         
         self.fig.tight_layout()
@@ -410,6 +402,7 @@ class MainWindow(QMainWindow):
         motion_layout.addWidget(self.create_positioning_group())
         motion_layout.addWidget(self.create_line_interp_group())
         motion_layout.addWidget(self.create_arc_interp_group())
+        motion_layout.addWidget(self.create_ai_panel())
         motion_layout.addStretch()
         
         motion_widget.setLayout(motion_layout)
@@ -506,18 +499,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("Y (mm):"), 1, 2)
         
         self.abs_x_input = QDoubleSpinBox()
-        self.abs_x_input.setRange(-1000, 1000)
+        self.abs_x_input.setRange(-500, 500)
         self.abs_x_input.setValue(0)
         layout.addWidget(self.abs_x_input, 2, 0, 1, 2)
         
         self.abs_y_input = QDoubleSpinBox()
-        self.abs_y_input.setRange(-1000, 1000)
+        self.abs_y_input.setRange(-500, 500)
         self.abs_y_input.setValue(0)
         layout.addWidget(self.abs_y_input, 2, 2, 1, 2)
         
         layout.addWidget(QLabel("速度:"), 3, 0)
         self.abs_speed_input = QSpinBox()
-        self.abs_speed_input.setRange(0, 10)
+        self.abs_speed_input.setRange(0, 50)
         self.abs_speed_input.setValue(10)
         layout.addWidget(self.abs_speed_input, 3, 1, 1, 3)
         
@@ -531,16 +524,16 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("ΔY (mm):"), 6, 2)
         
         self.rel_x_input = QDoubleSpinBox()
-        self.rel_x_input.setRange(-1000, 1000)
+        self.rel_x_input.setRange(-500, 500)
         layout.addWidget(self.rel_x_input, 7, 0, 1, 2)
         
         self.rel_y_input = QDoubleSpinBox()
-        self.rel_y_input.setRange(-1000, 1000)
+        self.rel_y_input.setRange(-500, 500)
         layout.addWidget(self.rel_y_input, 7, 2, 1, 2)
         
         layout.addWidget(QLabel("速度:"), 8, 0)
         self.rel_speed_input = QSpinBox()
-        self.rel_speed_input.setRange(0, 10)
+        self.rel_speed_input.setRange(0, 50)
         self.rel_speed_input.setValue(10)
         layout.addWidget(self.rel_speed_input, 8, 1, 1, 3)
         
@@ -558,23 +551,27 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(QLabel("起点 X:"), 0, 0)
         self.line_x1_input = QDoubleSpinBox()
+        self.line_x1_input.setRange(-500, 500)
         layout.addWidget(self.line_x1_input, 0, 1)
         
         layout.addWidget(QLabel("终点 X:"), 0, 2)
         self.line_x2_input = QDoubleSpinBox()
+        self.line_x2_input.setRange(-500, 500)
         layout.addWidget(self.line_x2_input, 0, 3)
         
         layout.addWidget(QLabel("起点 Y:"), 1, 0)
         self.line_y1_input = QDoubleSpinBox()
+        self.line_y1_input.setRange(-500, 500)
         layout.addWidget(self.line_y1_input, 1, 1)
         
         layout.addWidget(QLabel("终点 Y:"), 1, 2)
         self.line_y2_input = QDoubleSpinBox()
+        self.line_y2_input.setRange(-500, 500)
         layout.addWidget(self.line_y2_input, 1, 3)
         
         layout.addWidget(QLabel("速度:"), 2, 0)
         self.line_speed_input = QSpinBox()
-        self.line_speed_input.setRange(0, 10)
+        self.line_speed_input.setRange(0, 50)
         self.line_speed_input.setValue(10)
         layout.addWidget(self.line_speed_input, 2, 1, 1, 3)
         
@@ -592,10 +589,12 @@ class MainWindow(QMainWindow):
         
         layout.addWidget(QLabel("圆心 X:"), 0, 0)
         self.arc_xc_input = QDoubleSpinBox()
+        self.arc_xc_input.setRange(-500, 500)
         layout.addWidget(self.arc_xc_input, 0, 1)
         
         layout.addWidget(QLabel("圆心 Y:"), 0, 2)
         self.arc_yc_input = QDoubleSpinBox()
+        self.arc_yc_input.setRange(-500, 500)
         layout.addWidget(self.arc_yc_input, 0, 3)
         
         layout.addWidget(QLabel("半径:"), 1, 0)
@@ -628,7 +627,7 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("速度:"), 3, 0)
         self.arc_speed_input = QSpinBox()
-        self.arc_speed_input.setRange(0, 10)
+        self.arc_speed_input.setRange(0, 50)
         self.arc_speed_input.setValue(10)
         layout.addWidget(self.arc_speed_input, 3, 1, 1, 3)
         
@@ -658,10 +657,6 @@ class MainWindow(QMainWindow):
         
         plot_group.setLayout(plot_layout)
         layout.addWidget(plot_group, 2)
-        
-        # AI 汉字书写面板
-        ai_group = self.create_ai_panel()
-        layout.addWidget(ai_group, 1)
         
         # 日志面板
         log_group = QGroupBox("日志")
@@ -869,20 +864,20 @@ class MainWindow(QMainWindow):
         # 书写速度
         layout.addWidget(QLabel("速度:"), 2, 2)
         self.ai_speed_input = QSpinBox()
-        self.ai_speed_input.setRange(1, 10)
+        self.ai_speed_input.setRange(1, 50)
         self.ai_speed_input.setValue(3)
         layout.addWidget(self.ai_speed_input, 2, 3)
         
         # 起点坐标
         layout.addWidget(QLabel("起点X:"), 3, 0)
         self.ai_origin_x = QDoubleSpinBox()
-        self.ai_origin_x.setRange(0, 300)
+        self.ai_origin_x.setRange(0, 500)
         self.ai_origin_x.setValue(50)
         layout.addWidget(self.ai_origin_x, 3, 1)
         
         layout.addWidget(QLabel("起点Y:"), 3, 2)
         self.ai_origin_y = QDoubleSpinBox()
-        self.ai_origin_y.setRange(0, 300)
+        self.ai_origin_y.setRange(0, 500)
         self.ai_origin_y.setValue(100)
         layout.addWidget(self.ai_origin_y, 3, 3)
         
@@ -904,13 +899,13 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("X最大:"), 5, 0)
         self.workspace_x_input = QDoubleSpinBox()
         self.workspace_x_input.setRange(10, 500)
-        self.workspace_x_input.setValue(300)
+        self.workspace_x_input.setValue(self.workspace_x_max)
         layout.addWidget(self.workspace_x_input, 5, 1)
 
         layout.addWidget(QLabel("Y最大:"), 5, 2)
         self.workspace_y_input = QDoubleSpinBox()
         self.workspace_y_input.setRange(10, 500)
-        self.workspace_y_input.setValue(300)
+        self.workspace_y_input.setValue(self.workspace_y_max)
         layout.addWidget(self.workspace_y_input, 5, 3)
 
         # 边界检测按钮 + 自动换行
@@ -1040,9 +1035,32 @@ class MainWindow(QMainWindow):
             self.ai_queue.append(item)
 
         count = len(self.ai_queue)
-        self.ai_status_label.setText(f"共 {count} 条指令，开始执行...")
-        self.signal_emitter.log_message.emit(f"AI: 生成 {count} 条指令，开始执行")
+        pen_up_count = sum(1 for it in resp.instructions if it.get("action") == "pen_up")
+        pen_down_count = sum(1 for it in resp.instructions if it.get("action") == "pen_down")
+        move_count = sum(1 for it in resp.instructions if it.get("action") in ("move_abs", "move_rel"))
+        line_count = sum(1 for it in resp.instructions if it.get("action") == "line_interp")
+        self.signal_emitter.log_message.emit(
+            f"AI: 生成 {count} 条指令 (pen_up={pen_up_count} pen_down={pen_down_count} "
+            f"move={move_count} line={line_count})，开始执行"
+        )
 
+        # 写 AI 调试日志
+        import json
+        try:
+            import os as _os
+            debug_path = _os.path.join(_os.path.dirname(__file__), "ai_debug.log")
+            with open(debug_path, "w", encoding="utf-8") as f:
+                f.write(f"# AI 响应调试日志\n")
+                f.write(f"# 原文: {text}\n")
+                f.write(f"# 指令总数: {count}\n")
+                f.write(f"# pen_up={pen_up_count} pen_down={pen_down_count} move={move_count} line={line_count}\n")
+                f.write(f"# --- 完整指令列表 ---\n")
+                for i, item in enumerate(resp.instructions):
+                    f.write(f"[{i:03d}] {json.dumps(item, ensure_ascii=False)}\n")
+        except Exception:
+            pass
+
+        self.ai_status_label.setText(f"共 {count} 条指令，开始执行...")
         self.ai_timer.start(200)
     
     def on_ai_stop(self):
@@ -1077,7 +1095,7 @@ class MainWindow(QMainWindow):
         self._last_known_x = self.controller.current_x
         self.signal_emitter.log_message.emit("边界检测: 正在向 X 远端移动...")
         self.ai_status_label.setText("检测 X 边界...")
-        self.controller.move_abs(500.0, self.controller.current_y, 5)
+        self.controller.move_abs(500.0, self.controller.current_y, 30)
         self._boundary_timer.start(500)
 
     def _boundary_detect_tick(self):
@@ -1092,7 +1110,7 @@ class MainWindow(QMainWindow):
                 )
                 self.controller.stop()
                 self._boundary_step = 1
-                self.controller.move_abs(10.0, self.controller.current_y, 5)
+                self.controller.move_abs(10.0, self.controller.current_y, 30)
             elif status == PlatformStatus.IDLE:
                 # 正常走完了500mm（没碰到限位）—— 以当前位置为界
                 self._ws_x_max = self.controller.current_x
@@ -1108,7 +1126,7 @@ class MainWindow(QMainWindow):
         elif self._boundary_step == 2:
             self.ai_status_label.setText("检测 Y 边界...")
             self.signal_emitter.log_message.emit("边界检测: 正在向 Y 远端移动...")
-            self.controller.move_abs(self.controller.current_x, 500.0, 5)
+            self.controller.move_abs(self.controller.current_x, 500.0, 30)
             self._boundary_step = 3
 
         elif self._boundary_step == 3:
@@ -1119,7 +1137,7 @@ class MainWindow(QMainWindow):
                 )
                 self.controller.stop()
                 self._boundary_step = 4
-                self.controller.move_abs(self.controller.current_x, 10.0, 5)
+                self.controller.move_abs(self.controller.current_x, 10.0, 30)
             elif status == PlatformStatus.IDLE:
                 self._ws_y_max = self.controller.current_y
                 self.signal_emitter.log_message.emit(

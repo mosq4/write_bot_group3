@@ -71,7 +71,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
   else if (GPIO_Pin == g_xyPlatform.x->limit_switch2_pin)
   {
-    //x轴上限边界，对应错误状态
+    //x轴远端边界，对应错误状态
     if (HAL_GPIO_ReadPin(g_xyPlatform.x->limit_switch2_port, g_xyPlatform.x->limit_switch2_pin) == GPIO_PIN_SET)
     {
       g_xyPlatform.x->SetMode(x_linear_module::MODULE_MODE_ERROR);
@@ -94,10 +94,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   }
   else if (GPIO_Pin == g_xyPlatform.y->limit_switch2_pin)
   {
-    //y轴上限边界，对应错误状态
-    if (HAL_GPIO_ReadPin(g_xyPlatform.y->limit_switch2_port, g_xyPlatform.y->limit_switch2_pin  ) == GPIO_PIN_SET)
+    //y轴远端边界，对应错误状态
+    if (HAL_GPIO_ReadPin(g_xyPlatform.y->limit_switch2_port, g_xyPlatform.y->limit_switch2_pin) == GPIO_PIN_SET)
     {
-        // Handle limit switch trigger
         g_xyPlatform.y->SetMode(x_linear_module::MODULE_MODE_ERROR);
         g_xyPlatform.y->SetTargetVelocityHard(0);
     }
@@ -114,7 +113,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void StartDefaultTask(void *argument)
 {
   MX_USB_DEVICE_Init();
-  g_xyPlatform.MotionConfig(1, 1, 10.0f, 500.0f);
+  g_xyPlatform.MotionConfig(-1, -1, 10.0f, 500.0f);
   g_pen.Init();
   g_xyPlatform.x->SetMode(x_linear_module::MODULE_MODE_VELOCITY);
   g_xyPlatform.y->SetMode(x_linear_module::MODULE_MODE_VELOCITY);

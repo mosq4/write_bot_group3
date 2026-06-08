@@ -11,3 +11,4 @@ __pycache__/
 gui/apikey.txt
 gui/ai_response.json
 gui/ai_request.txt
+gui/ai_debug.log
