@@ -32,7 +32,8 @@ from protocol import (
     CommandBuilder, ResponseParser, CommandType, PlatformStatus, ProtocolFrame
 )
 from usb_comm import USBCommunicator
-from hanzi_gcode_tool.hanzi_to_gcode import HanziToGcode, GcodeConfig
+from json_stroke_loader import load_database, decompose_text_with_layout
+from text_to_path import WritingPath, Stroke
 
 logger = logging.getLogger(__name__)
 
@@ -894,21 +895,11 @@ class MainWindow(QMainWindow):
         self.gcode_speed_input.setRange(50, 2000)
         self.gcode_speed_input.setValue(600)
         self.gcode_speed_input.setSingleStep(10)
-        layout.addWidget(self.gcode_speed_input, 3, 1)
-
-        layout.addWidget(QLabel("模式:"), 3, 2)
-        self.gcode_font_mode = QComboBox()
-        self.gcode_font_mode.addItem("正常字(中心线)", "normal")
-        self.gcode_font_mode.addItem("艺术字(轮廓)", "art")
-        layout.addWidget(self.gcode_font_mode, 3, 3)
+        layout.addWidget(self.gcode_speed_input, 3, 1, 1, 3)
 
         self.gcode_status_label = QLabel("就绪")
         self.gcode_status_label.setFont(QFont("Arial", 9))
         layout.addWidget(self.gcode_status_label, 4, 0, 1, 2)
-
-        dl_btn = QPushButton("下载汉字库")
-        dl_btn.clicked.connect(self._on_download_hanzi_lib)
-        layout.addWidget(dl_btn, 4, 2, 1, 2)
 
         gen_btn = QPushButton("生成G代码")
         gen_btn.clicked.connect(self._on_generate_gcode)
@@ -954,32 +945,85 @@ class MainWindow(QMainWindow):
         self.signal_emitter.error_occurred.emit(f"G-code: 汉字库下载失败: {last_err}")
         QMessageBox.warning(self, "下载失败", "无法下载汉字库 all.json，请检查网络连接")
 
-    def _text_to_polylines(self, text: str, text_size: int, font_mode: str = "normal") -> list:
-        cfg = GcodeConfig(
-            text=text,
-            height=float(text_size),
-            x0=self.gcode_origin_x.value(),
-            y0=self.gcode_origin_y.value(),
-            char_gap=max(2.0, float(text_size) * 0.20),
-            line_gap=max(4.0, float(text_size) * 0.40),
-            max_line_width=float(self.gcode_line_width.value()),
-            feed=float(self.gcode_speed_input.value()),
-            travel_feed=float(self.gcode_speed_input.value()) * 2,
-            curve_segments=6,
-            decimals=2,
-            use_z=False,
-            scale_y_flip=True,
-            pen_on="M03 S500",
-            pen_off="M05 S0",
-            font_mode=font_mode,
-            hanzi_library_dir=os.path.join(os.path.dirname(__file__), "hanzi_gcode_tool", "hanzi_writer_data"),
-            auto_download_hanzi=True,
-        )
-        converter = HanziToGcode(cfg)
-        lines = converter.text_to_polylines()
-        self._last_external_hanzi_used = getattr(converter, "last_external_hanzi_used", 0)
-        self._last_external_hanzi_missing = getattr(converter, "last_external_hanzi_missing", 0)
-        return lines
+    def _text_to_polylines(self, text: str, text_size: int) -> list:
+        """用本地 all.json 笔画库生成 polylines"""
+        db = load_database()
+        if db is None:
+            self.signal_emitter.log_message.emit("G-code: 未找到 all.json 笔画库")
+            return []
+
+        result = decompose_text_with_layout(text, db)
+        if result is None:
+            return []
+        path, char_groups = result
+        if path.is_empty:
+            return []
+
+        _RAW_HEIGHT = 1000.0
+        _RAW_WIDTH = 900.0
+        scale = float(text_size) / _RAW_HEIGHT
+        char_w = _RAW_WIDTH * scale
+        spacing = max(2.0, float(text_size) * 0.20)
+        line_gap = max(4.0, float(text_size) * 0.40)
+        max_width = float(self.gcode_line_width.value())
+        origin_x = self.gcode_origin_x.value()
+        origin_y = self.gcode_origin_y.value()
+
+        import math
+        lines_dict = {}
+        for g in char_groups:
+            li = g.get("line", 0)
+            lines_dict.setdefault(li, []).append(g)
+
+        final_lines = []
+        for li in sorted(lines_dict.keys()):
+            row = []
+            cur_w = 0.0
+            for g in lines_dict[li]:
+                if g.get("is_empty_line"):
+                    continue
+                if row and cur_w + char_w + spacing > max_width:
+                    final_lines.append(row)
+                    row = []
+                    cur_w = 0.0
+                row.append(g)
+                cur_w += char_w + spacing
+            if row:
+                final_lines.append(row)
+
+        polylines = []
+        row_idx = 0
+        for row in final_lines:
+            row_width = len(row) * char_w + (len(row) - 1) * spacing
+            x_start = origin_x + (max_width - row_width) / 2.0
+            y_center = origin_y + row_idx * (text_size + line_gap) + text_size / 2.0
+            x_cursor = x_start + char_w / 2.0
+
+            for g in row:
+                for si in range(g["stroke_start"], g["stroke_end"]):
+                    stroke = path.strokes[si]
+                    pts_raw = stroke.points
+                    if len(pts_raw) < 2:
+                        continue
+                    x_min = min(p[0] for p in pts_raw)
+                    x_max = max(p[0] for p in pts_raw)
+                    y_min = min(p[1] for p in pts_raw)
+                    y_max = max(p[1] for p in pts_raw)
+                    cx = (x_min + x_max) / 2.0
+                    cy = (y_min + y_max) / 2.0
+                    stroke_scale = scale * 0.85
+                    poly = []
+                    for px, py in pts_raw:
+                        nx = x_cursor + (px - cx) * stroke_scale
+                        ny = y_center + (py - cy) * stroke_scale
+                        poly.append((nx, ny))
+                    polylines.append(poly)
+                x_cursor += char_w + spacing
+            row_idx += 1
+
+        self._last_external_hanzi_used = len(char_groups) - sum(1 for g in char_groups if g.get("is_empty_line"))
+        self._last_external_hanzi_missing = len(text) - self._last_external_hanzi_used
+        return polylines
 
     @staticmethod
     def _polyline_length(poly):
@@ -1147,16 +1191,12 @@ class MainWindow(QMainWindow):
         try:
             text_size = self.gcode_text_size.value()
             feedrate = self.gcode_speed_input.value()
-            font_mode = self.gcode_font_mode.currentData()
 
-            polylines = self._text_to_polylines(text, text_size, font_mode)
+            polylines = self._text_to_polylines(text, text_size)
             if not polylines:
                 self.signal_emitter.log_message.emit("G-code: 没有生成有效轨迹")
                 return
 
-            polylines = self._simplify_polylines(polylines, min_step=0.35)
-            polylines = self._optimize_polylines(polylines)
-            polylines = self._normalize_polylines(polylines, margin=5.0)
             gcode_lines = self._polylines_to_gcode(polylines, feedrate)
             self._last_gcode_text = "\n".join(gcode_lines) + "\n"
 
@@ -1182,19 +1222,17 @@ class MainWindow(QMainWindow):
             )
             self.canvas.draw_idle()
 
-            mode_name = "艺术字" if font_mode == "art" else "正常字"
             self.gcode_status_label.setText(
                 f"{len(polylines)}笔画 G2/G3={self._last_gcode_arc_count} G1={self._last_gcode_line_count}"
             )
             self.signal_emitter.log_message.emit(
-                f"G-code 已生成: {text} ({mode_name}) 笔画{len(polylines)}段 "
+                f"G-code 已生成: {text} 笔画{len(polylines)}段 "
                 f"G2/G3={self._last_gcode_arc_count} G1={self._last_gcode_line_count}"
             )
-            if font_mode != "art":
-                self.signal_emitter.log_message.emit(
-                    f"汉字库: 命中{self._last_external_hanzi_used}字 "
-                    f"缺字{self._last_external_hanzi_missing}字"
-                )
+            self.signal_emitter.log_message.emit(
+                f"笔画库: 命中{self._last_external_hanzi_used}字 "
+                f"缺字{self._last_external_hanzi_missing}字"
+            )
         except Exception as e:
             self.gcode_status_label.setText("生成失败")
             self.signal_emitter.error_occurred.emit(f"G-code 生成失败: {e}")
