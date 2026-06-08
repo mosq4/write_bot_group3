@@ -28,6 +28,7 @@ from protocol import (
     CommandBuilder, ResponseParser, CommandType, PlatformStatus, ProtocolFrame
 )
 from usb_comm import USBCommunicator
+from hanzi_gcode_tool.hanzi_to_gcode import HanziToGcode, GcodeConfig
 
 logger = logging.getLogger(__name__)
 
