@@ -676,6 +676,7 @@ class MainWindow(QMainWindow):
         button_layout.addWidget(query_btn)
         
         self.auto_query_check = QCheckBox("自动查询 (0.05s)")
+        self.auto_query_check.setChecked(True)
         self.auto_query_check.toggled.connect(self.on_auto_query_toggled)
         button_layout.addWidget(self.auto_query_check)
         
@@ -844,14 +845,15 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(QLabel("输入文字:"), 0, 0)
         self.gcode_text_input = QTextEdit()
-        self.gcode_text_input.setMaximumHeight(60)
+        self.gcode_text_input.setMaximumHeight(80)
+        self.gcode_text_input.setFont(QFont("Arial", 14))
         self.gcode_text_input.setPlaceholderText("请输入中文或英文...")
         layout.addWidget(self.gcode_text_input, 0, 1, 1, 3)
 
         layout.addWidget(QLabel("字号(mm):"), 1, 0)
         self.gcode_text_size = QSpinBox()
-        self.gcode_text_size.setRange(5, 50)
-        self.gcode_text_size.setValue(15)
+        self.gcode_text_size.setRange(5, 250)
+        self.gcode_text_size.setValue(50)
         layout.addWidget(self.gcode_text_size, 1, 1)
 
         layout.addWidget(QLabel("行宽(mm):"), 1, 2)
