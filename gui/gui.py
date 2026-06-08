@@ -1187,12 +1187,17 @@ class MainWindow(QMainWindow):
         return lines
     
     def _on_ai_tick(self):
-        """AI 指令队列定时执行"""
+        """AI 指令队列逐条执行，运动指令等待到位后再发下一条"""
         if not self.ai_queue:
             self.ai_timer.stop()
             self.ai_status_label.setText("执行完成")
             self.signal_emitter.log_message.emit("AI: 所有指令执行完成")
             return
+
+        # 确保自动查询开启，否则 wait_until_reached 无法感知到位
+        if not self.auto_query_check.isChecked():
+            self.auto_query_check.setChecked(True)
+            self.status_timer.start(STATUS_QUERY_INTERVAL_MS)
         
         item = self.ai_queue.popleft()
         action = item.get("action", "")
@@ -1208,41 +1213,49 @@ class MainWindow(QMainWindow):
                     float(item.get("angle", 90))
                 )
             elif action == "move_abs":
-                self.controller.move_abs(
-                    float(item.get("x", 0)),
-                    float(item.get("y", 0)),
-                    int(item.get("speed", 5))
-                )
+                x = float(item.get("x", 0))
+                y = float(item.get("y", 0))
+                speed = int(item.get("speed", 5))
+                self.controller.move_abs(x, y, speed)
+                self._ai_wait_reached(x, y, speed)
             elif action == "move_rel":
-                self.controller.move_rel(
-                    float(item.get("dx", 0)),
-                    float(item.get("dy", 0)),
-                    int(item.get("speed", 5))
-                )
+                dx = float(item.get("dx", 0))
+                dy = float(item.get("dy", 0))
+                speed = int(item.get("speed", 5))
+                tx = self.controller.current_x + dx
+                ty = self.controller.current_y + dy
+                self.controller.move_rel(dx, dy, speed)
+                self._ai_wait_reached(tx, ty, speed)
             elif action == "line_interp":
+                x2 = float(item.get("x2", 0))
+                y2 = float(item.get("y2", 0))
+                speed = int(item.get("speed", 3))
                 self.controller.line_interp(
-                    float(item.get("x1", 0)),
-                    float(item.get("y1", 0)),
-                    float(item.get("x2", 0)),
-                    float(item.get("y2", 0)),
-                    int(item.get("speed", 3))
+                    float(item.get("x1", 0)), float(item.get("y1", 0)),
+                    x2, y2, speed
                 )
+                self._ai_wait_reached(x2, y2, speed)
             elif action == "arc_interp":
+                speed = int(item.get("speed", 3))
+                angle_end = float(item.get("angle_end", 90))
+                xc = float(item.get("xc", 0))
+                yc = float(item.get("yc", 0))
+                radius = float(item.get("radius", 10))
+                import math
+                ex = xc + radius * math.cos(math.radians(angle_end))
+                ey = yc + radius * math.sin(math.radians(angle_end))
                 self.controller.arc_interp(
-                    float(item.get("xc", 0)),
-                    float(item.get("yc", 0)),
-                    float(item.get("radius", 10)),
-                    float(item.get("angle_start", 0)),
-                    float(item.get("angle_end", 90)),
-                    bool(item.get("clockwise", False)),
-                    int(item.get("speed", 3))
+                    xc, yc, radius,
+                    float(item.get("angle_start", 0)), angle_end,
+                    bool(item.get("clockwise", False)), speed
                 )
+                self._ai_wait_reached(ex, ey, speed)
             elif action == "home":
                 self.controller.home()
             elif action == "stop":
                 self.controller.stop()
             elif action == "delay":
-                pass  # 单纯等待一拍的指令，由定时器间隔提供
+                pass
             else:
                 self.signal_emitter.log_message.emit(f"AI: 未知指令类型 {action}，跳过")
         except Exception as e:
@@ -1251,6 +1264,44 @@ class MainWindow(QMainWindow):
         remaining = len(self.ai_queue)
         if remaining > 0 and remaining % 10 == 0:
             self.ai_status_label.setText(f"剩余 {remaining} 条指令...")
+
+    def _ai_wait_reached(self, target_x, target_y, speed):
+        """等待电机到达目标位置"""
+        import time
+        from PyQt5.QtWidgets import QApplication
+
+        target_x = float(target_x)
+        target_y = float(target_y)
+        speed = max(float(speed), 0.3)
+        dist = math.hypot(target_x - self.controller.current_x,
+                          target_y - self.controller.current_y)
+        if dist < 0.5:
+            return
+
+        timeout = max(2.0, dist / speed * 2.5 + 3.0)
+        last_query = 0.0
+        stable = 0
+        start = time.time()
+
+        while time.time() - start < timeout:
+            QApplication.processEvents()
+            now = time.time()
+            if self.comm.is_connected() and now - last_query >= 0.1:
+                self.controller.query_status()
+                last_query = now
+
+            ex = abs(self.controller.current_x - target_x)
+            ey = abs(self.controller.current_y - target_y)
+            if ex <= 0.5 and ey <= 0.5:
+                stable += 1
+                if stable >= 2:
+                    return
+            else:
+                stable = 0
+
+            if self.controller.current_status == PlatformStatus.ERROR:
+                return
+            time.sleep(0.03)
     
     def closeEvent(self, event):
         """关闭事件"""
