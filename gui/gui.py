@@ -946,7 +946,7 @@ class MainWindow(QMainWindow):
         QMessageBox.warning(self, "下载失败", "无法下载汉字库 all.json，请检查网络连接")
 
     def _text_to_polylines(self, text: str, text_size: int) -> list:
-        """用本地 all.json 笔画库生成 polylines"""
+        """用本地 all.json 笔画库生成 polylines（参考 bihua 排版思路）"""
         db = load_database()
         if db is None:
             self.signal_emitter.log_message.emit("G-code: 未找到 all.json 笔画库")
@@ -961,6 +961,7 @@ class MainWindow(QMainWindow):
 
         _RAW_HEIGHT = 1000.0
         _RAW_WIDTH = 900.0
+        _RAW_CENTER = 500.0
         scale = float(text_size) / _RAW_HEIGHT
         char_w = _RAW_WIDTH * scale
         spacing = max(2.0, float(text_size) * 0.20)
@@ -969,7 +970,6 @@ class MainWindow(QMainWindow):
         origin_x = self.gcode_origin_x.value()
         origin_y = self.gcode_origin_y.value()
 
-        import math
         lines_dict = {}
         for g in char_groups:
             li = g.get("line", 0)
@@ -992,37 +992,27 @@ class MainWindow(QMainWindow):
                 final_lines.append(row)
 
         polylines = []
-        row_idx = 0
-        for row in final_lines:
-            row_width = len(row) * char_w + (len(row) - 1) * spacing
-            x_start = origin_x + (max_width - row_width) / 2.0
-            y_center = origin_y + row_idx * (text_size + line_gap) + text_size / 2.0
-            x_cursor = x_start + char_w / 2.0
+        for l_idx, row in enumerate(final_lines):
+            n = len(row)
+            row_total = n * char_w + (n - 1) * spacing
+            x_start = origin_x + (max_width - row_total) / 2.0
+            line_cy = origin_y + l_idx * (text_size + line_gap) + text_size / 2.0
 
-            for g in row:
+            for c_idx, g in enumerate(row):
+                char_cx = x_start + c_idx * (char_w + spacing) + char_w / 2.0
                 for si in range(g["stroke_start"], g["stroke_end"]):
-                    stroke = path.strokes[si]
-                    pts_raw = stroke.points
+                    pts_raw = path.strokes[si].points
                     if len(pts_raw) < 2:
                         continue
-                    x_min = min(p[0] for p in pts_raw)
-                    x_max = max(p[0] for p in pts_raw)
-                    y_min = min(p[1] for p in pts_raw)
-                    y_max = max(p[1] for p in pts_raw)
-                    cx = (x_min + x_max) / 2.0
-                    cy = (y_min + y_max) / 2.0
-                    stroke_scale = scale * 0.85
                     poly = []
-                    for px, py in pts_raw:
-                        nx = x_cursor + (px - cx) * stroke_scale
-                        ny = y_center + (py - cy) * stroke_scale
+                    for x, y in pts_raw:
+                        nx = char_cx + (x - _RAW_CENTER) * scale
+                        ny = line_cy + (y - _RAW_CENTER) * scale
                         poly.append((nx, ny))
                     polylines.append(poly)
-                x_cursor += char_w + spacing
-            row_idx += 1
 
         self._last_external_hanzi_used = len(char_groups) - sum(1 for g in char_groups if g.get("is_empty_line"))
-        self._last_external_hanzi_missing = len(text) - self._last_external_hanzi_used
+        self._last_external_hanzi_missing = len(text) - max(self._last_external_hanzi_used, 0)
         return polylines
 
     @staticmethod
