@@ -968,6 +968,7 @@ class MainWindow(QMainWindow):
             curve_segments=6,
             decimals=2,
             use_z=False,
+            scale_y_flip=True,
             pen_on="M03 S500",
             pen_off="M05 S0",
             font_mode=font_mode,
