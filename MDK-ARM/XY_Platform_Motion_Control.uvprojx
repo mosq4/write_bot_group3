@@ -466,6 +466,11 @@
               <FilePath>.\Drivers\xusb.cpp</FilePath>
             </File>
             <File>
+              <FileName>xpen.cpp</FileName>
+              <FileType>8</FileType>
+              <FilePath>.\Drivers\xpen.cpp</FilePath>
+            </File>
+            <File>
               <FileName>pid.h</FileName>
               <FileType>5</FileType>
               <FilePath>.\Drivers\pid.h</FilePath>
@@ -489,6 +494,11 @@
               <FileName>xusb.h</FileName>
               <FileType>5</FileType>
               <FilePath>.\Drivers\xusb.h</FilePath>
+            </File>
+            <File>
+              <FileName>xpen.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Drivers\xpen.h</FilePath>
             </File>
             <File>
               <FileName>XYplatform.h</FileName>
