@@ -846,8 +846,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("输入文字:"), 0, 0)
         self.gcode_text_input = QTextEdit()
         self.gcode_text_input.setMaximumHeight(80)
-        self.gcode_text_input.setFont(QFont("Arial", 14))
+        self.gcode_text_input.setFont(QFont("Microsoft YaHei", 16))
         self.gcode_text_input.setPlaceholderText("请输入中文或英文...")
+        self.gcode_text_input.setStyleSheet("font-size: 16pt;")
         layout.addWidget(self.gcode_text_input, 0, 1, 1, 3)
 
         layout.addWidget(QLabel("字号(mm):"), 1, 0)
