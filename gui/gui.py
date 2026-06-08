@@ -877,35 +877,47 @@ class MainWindow(QMainWindow):
         self.gcode_line_width.setValue(260)
         layout.addWidget(self.gcode_line_width, 1, 3)
 
-        layout.addWidget(QLabel("速度:"), 2, 0)
+        layout.addWidget(QLabel("起点X:"), 2, 0)
+        self.gcode_origin_x = QDoubleSpinBox()
+        self.gcode_origin_x.setRange(0, 500)
+        self.gcode_origin_x.setValue(5)
+        layout.addWidget(self.gcode_origin_x, 2, 1)
+
+        layout.addWidget(QLabel("起点Y:"), 2, 2)
+        self.gcode_origin_y = QDoubleSpinBox()
+        self.gcode_origin_y.setRange(0, 500)
+        self.gcode_origin_y.setValue(5)
+        layout.addWidget(self.gcode_origin_y, 2, 3)
+
+        layout.addWidget(QLabel("速度:"), 3, 0)
         self.gcode_speed_input = QSpinBox()
         self.gcode_speed_input.setRange(50, 2000)
         self.gcode_speed_input.setValue(600)
         self.gcode_speed_input.setSingleStep(10)
-        layout.addWidget(self.gcode_speed_input, 2, 1)
+        layout.addWidget(self.gcode_speed_input, 3, 1)
 
-        layout.addWidget(QLabel("模式:"), 2, 2)
+        layout.addWidget(QLabel("模式:"), 3, 2)
         self.gcode_font_mode = QComboBox()
         self.gcode_font_mode.addItem("正常字(中心线)", "normal")
         self.gcode_font_mode.addItem("艺术字(轮廓)", "art")
-        layout.addWidget(self.gcode_font_mode, 2, 3)
+        layout.addWidget(self.gcode_font_mode, 3, 3)
 
         self.gcode_status_label = QLabel("就绪")
         self.gcode_status_label.setFont(QFont("Arial", 9))
-        layout.addWidget(self.gcode_status_label, 3, 0, 1, 2)
+        layout.addWidget(self.gcode_status_label, 4, 0, 1, 2)
 
         dl_btn = QPushButton("下载汉字库")
         dl_btn.clicked.connect(self._on_download_hanzi_lib)
-        layout.addWidget(dl_btn, 3, 2, 1, 2)
+        layout.addWidget(dl_btn, 4, 2, 1, 2)
 
         gen_btn = QPushButton("生成G代码")
         gen_btn.clicked.connect(self._on_generate_gcode)
-        layout.addWidget(gen_btn, 4, 0, 1, 2)
+        layout.addWidget(gen_btn, 5, 0, 1, 2)
 
         exec_btn = QPushButton("开始写字")
         exec_btn.setStyleSheet("background-color: #BBDEFB;")
         exec_btn.clicked.connect(self._on_start_writing)
-        layout.addWidget(exec_btn, 4, 2, 1, 2)
+        layout.addWidget(exec_btn, 5, 2, 1, 2)
 
         group.setLayout(layout)
         return group
@@ -946,8 +958,8 @@ class MainWindow(QMainWindow):
         cfg = GcodeConfig(
             text=text,
             height=float(text_size),
-            x0=0.0,
-            y0=0.0,
+            x0=self.gcode_origin_x.value(),
+            y0=self.gcode_origin_y.value(),
             char_gap=max(2.0, float(text_size) * 0.20),
             line_gap=max(4.0, float(text_size) * 0.40),
             max_line_width=float(self.gcode_line_width.value()),
