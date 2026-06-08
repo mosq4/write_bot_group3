@@ -75,8 +75,8 @@ class XYPlotCanvas(FigureCanvas):
         self._draw_workspace()
         
         # 轨迹记录
-        self.trajectory_x = deque(maxlen=500)
-        self.trajectory_y = deque(maxlen=500)
+        self.trajectory_x = deque(maxlen=2500)
+        self.trajectory_y = deque(maxlen=2500)
         self.trajectory_line, = self.ax.plot([], [], 'o-', color='tab:blue', markersize=2, linewidth=1, alpha=0.7)
         
         # 当前位置点
