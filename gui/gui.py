@@ -1361,6 +1361,7 @@ class MainWindow(QMainWindow):
                 pen_down = True
                 self.controller.pen_down()
                 self.signal_emitter.log_message.emit("→ 落笔")
+                import time; time.sleep(0.15)
             elif cmd in ('M05', 'M5'):
                 pen_down = False
                 self.controller.pen_up()
@@ -1420,7 +1421,7 @@ class MainWindow(QMainWindow):
             if not self.writing_active:
                 return False
             now = time.time()
-            if self.comm.is_connected() and now - last_query >= 0.08:
+            if self.comm.is_connected() and now - last_query >= 0.2:
                 self.controller.query_status()
                 last_query = now
             QApplication.processEvents()
@@ -1437,7 +1438,7 @@ class MainWindow(QMainWindow):
                 return True
             if self.controller.current_status == PlatformStatus.ERROR:
                 return False
-            time.sleep(0.025)
+            time.sleep(0.05)
 
         if self.comm.is_connected():
             self.controller.query_status()
