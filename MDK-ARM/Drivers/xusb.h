@@ -21,6 +21,8 @@ typedef enum {
     CMD_ARC_INTERP     = 0x05,    /* 圆弧插补 */
     CMD_STOP           = 0x06,    /* 停止 */
     CMD_QUERY_STATUS   = 0x07,    /* 查询状态 */
+    CMD_SERVO          = 0x08,    /* 舵机控制 */
+    CMD_PEN            = 0x09,    /* 抬落笔 */
     CMD_STATUS_RESPONSE = 0xF0    /* 状态响应 */
 } UsbCommandType_t;
 

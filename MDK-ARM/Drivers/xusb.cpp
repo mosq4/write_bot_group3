@@ -161,6 +161,7 @@ void usb_handle_command(uint8_t cmd, uint8_t *data, uint8_t data_len)
         case CMD_STOP:
             /* 停止 */
             g_xyPlatform.Stop();
+            g_pen.Up(); // 紧急停止时抬笔
             break;
         
         case CMD_QUERY_STATUS:
@@ -179,6 +180,31 @@ void usb_handle_command(uint8_t cmd, uint8_t *data, uint8_t data_len)
                 response[9] = 0;
                 
                 usb_send_response(CMD_STATUS_RESPONSE, response, 10);
+            }
+            break;
+        
+        case CMD_SERVO:
+            /* 舵机控制: data = [id(1B) angle(4B float)] */
+            if (data_len >= 5) {
+                uint8_t servo_id = data[0];
+                float angle;
+                memcpy(&angle, &data[1], 4);
+                if (servo_id == 1) {
+                    if (angle > 45.0f)
+                        g_pen.Down();
+                    else
+                        g_pen.Up();
+                }
+            }
+            break;
+        
+        case CMD_PEN:
+            /* 抬落笔: data = [state(1B)]  0=抬笔 1=落笔 */
+            if (data_len >= 1) {
+                if (data[0])
+                    g_pen.Down();
+                else
+                    g_pen.Up();
             }
             break;
         

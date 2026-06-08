@@ -115,6 +115,7 @@ void StartDefaultTask(void *argument)
 {
   MX_USB_DEVICE_Init();
   g_xyPlatform.MotionConfig(1, 1, 10.0f, 500.0f);
+  g_pen.Init();
   g_xyPlatform.x->SetMode(x_linear_module::MODULE_MODE_VELOCITY);
   g_xyPlatform.y->SetMode(x_linear_module::MODULE_MODE_VELOCITY);
   osThreadResume(debugTaskHandle);

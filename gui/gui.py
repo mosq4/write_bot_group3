@@ -13,7 +13,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QSpinBox, QDoubleSpinBox, QComboBox,
     QStatusBar, QGroupBox, QTextEdit, QMessageBox, QCheckBox,
-    QScrollArea, QSplitter
+    QScrollArea, QSplitter, QLineEdit
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QObject, QSize
 from PyQt5.QtGui import QFont
@@ -28,6 +28,8 @@ from protocol import (
     CommandBuilder, ResponseParser, CommandType, PlatformStatus, ProtocolFrame
 )
 from usb_comm import USBCommunicator
+from ai_instruction import generate_via_api, generate_via_api_multiline, build_prompt, AIResponse, write_request, read_response, clear_response
+from deepseek_client import DeepSeekClient
 
 logger = logging.getLogger(__name__)
 
@@ -211,6 +213,21 @@ class XYPlatformController:
         """停止"""
         return self.send_command(CommandBuilder.stop(), "紧急停止")
     
+    def pen_down(self):
+        """落笔"""
+        return self.send_command(CommandBuilder.pen_down(), "落笔")
+    
+    def pen_up(self):
+        """抬笔"""
+        return self.send_command(CommandBuilder.pen_up(), "抬笔")
+    
+    def servo(self, servo_id: int, angle: float):
+        """舵机控制"""
+        return self.send_command(
+            CommandBuilder.servo(servo_id, angle),
+            f"舵机{servo_id} → {angle:.1f}°"
+        )
+    
     def query_status(self):
         """查询状态"""
         return self.send_command(CommandBuilder.query_status(), "查询状态")
@@ -263,6 +280,21 @@ class MainWindow(QMainWindow):
         # 定时器：定期查询状态
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.on_query_status)
+        
+        # AI 汉字书写：指令队列和定时器
+        self.ai_queue = deque()
+        self.ai_timer = QTimer()
+        self.ai_timer.timeout.connect(self._on_ai_tick)
+        self.api_key = ""
+
+        # 工作区边界（mm），回零后由限位开关确定物理范围
+        self.workspace_x_max = 300.0
+        self.workspace_y_max = 300.0
+
+        # 边界检测状态机
+        self._boundary_timer = QTimer()
+        self._boundary_timer.timeout.connect(self._boundary_detect_tick)
+        self._boundary_step = -1  # -1=空闲, 0~5=检测步骤
         
         # 初始化 UI
         self.init_ui()
@@ -627,6 +659,10 @@ class MainWindow(QMainWindow):
         plot_group.setLayout(plot_layout)
         layout.addWidget(plot_group, 2)
         
+        # AI 汉字书写面板
+        ai_group = self.create_ai_panel()
+        layout.addWidget(ai_group, 1)
+        
         # 日志面板
         log_group = QGroupBox("日志")
         log_layout = QVBoxLayout()
@@ -802,6 +838,401 @@ class MainWindow(QMainWindow):
             self.status_timer.start(STATUS_QUERY_INTERVAL_MS)
         else:
             self.status_timer.stop()
+    
+    # ===== AI 汉字书写面板 =====
+    
+    def create_ai_panel(self) -> QGroupBox:
+        """创建 AI 汉字书写面板"""
+        group = QGroupBox("AI 汉字书写")
+        layout = QGridLayout()
+        
+        # 输入汉字
+        layout.addWidget(QLabel("输入汉字:"), 0, 0)
+        self.char_input = QLineEdit()
+        self.char_input.setPlaceholderText("请输入要书写的汉字...")
+        layout.addWidget(self.char_input, 0, 1, 1, 3)
+        
+        # API Key
+        layout.addWidget(QLabel("API Key:"), 1, 0)
+        self.apikey_input = QLineEdit()
+        self.apikey_input.setPlaceholderText("sk-... (留空则从环境变量/apikey.txt读取)")
+        self.apikey_input.setEchoMode(QLineEdit.Password)
+        layout.addWidget(self.apikey_input, 1, 1, 1, 3)
+        
+        # 字体大小
+        layout.addWidget(QLabel("字号(mm):"), 2, 0)
+        self.font_size_input = QDoubleSpinBox()
+        self.font_size_input.setRange(5, 200)
+        self.font_size_input.setValue(20)
+        layout.addWidget(self.font_size_input, 2, 1)
+        
+        # 书写速度
+        layout.addWidget(QLabel("速度:"), 2, 2)
+        self.ai_speed_input = QSpinBox()
+        self.ai_speed_input.setRange(1, 10)
+        self.ai_speed_input.setValue(3)
+        layout.addWidget(self.ai_speed_input, 2, 3)
+        
+        # 起点坐标
+        layout.addWidget(QLabel("起点X:"), 3, 0)
+        self.ai_origin_x = QDoubleSpinBox()
+        self.ai_origin_x.setRange(0, 300)
+        self.ai_origin_x.setValue(50)
+        layout.addWidget(self.ai_origin_x, 3, 1)
+        
+        layout.addWidget(QLabel("起点Y:"), 3, 2)
+        self.ai_origin_y = QDoubleSpinBox()
+        self.ai_origin_y.setRange(0, 300)
+        self.ai_origin_y.setValue(100)
+        layout.addWidget(self.ai_origin_y, 3, 3)
+        
+        # 字间距
+        layout.addWidget(QLabel("字间距:"), 4, 0)
+        self.ai_spacing = QDoubleSpinBox()
+        self.ai_spacing.setRange(0, 50)
+        self.ai_spacing.setValue(5)
+        layout.addWidget(self.ai_spacing, 4, 1)
+
+        # 行间距
+        layout.addWidget(QLabel("行间距:"), 4, 2)
+        self.line_spacing_input = QDoubleSpinBox()
+        self.line_spacing_input.setRange(0, 50)
+        self.line_spacing_input.setValue(5)
+        layout.addWidget(self.line_spacing_input, 4, 3)
+
+        # 工作区边界
+        layout.addWidget(QLabel("X最大:"), 5, 0)
+        self.workspace_x_input = QDoubleSpinBox()
+        self.workspace_x_input.setRange(10, 500)
+        self.workspace_x_input.setValue(300)
+        layout.addWidget(self.workspace_x_input, 5, 1)
+
+        layout.addWidget(QLabel("Y最大:"), 5, 2)
+        self.workspace_y_input = QDoubleSpinBox()
+        self.workspace_y_input.setRange(10, 500)
+        self.workspace_y_input.setValue(300)
+        layout.addWidget(self.workspace_y_input, 5, 3)
+
+        # 边界检测按钮 + 自动换行
+        detect_btn = QPushButton("检测边界")
+        detect_btn.clicked.connect(self.on_detect_boundary)
+        layout.addWidget(detect_btn, 6, 0, 1, 2)
+
+        self.auto_wrap_check = QCheckBox("自动换行")
+        self.auto_wrap_check.setChecked(True)
+        layout.addWidget(self.auto_wrap_check, 6, 2, 1, 2)
+        
+        # 状态标签
+        self.ai_status_label = QLabel("就绪")
+        self.ai_status_label.setFont(QFont("Arial", 9))
+        layout.addWidget(self.ai_status_label, 7, 0, 1, 4)
+        
+        # 生成并执行按钮
+        gen_btn = QPushButton("生成并执行")
+        gen_btn.setMinimumHeight(32)
+        gen_btn.setFont(QFont("Arial", 10, QFont.Bold))
+        gen_btn.clicked.connect(self.on_ai_generate_and_execute)
+        layout.addWidget(gen_btn, 8, 0, 1, 2)
+        
+        # 停止按钮
+        stop_btn = QPushButton("停止书写")
+        stop_btn.clicked.connect(self.on_ai_stop)
+        layout.addWidget(stop_btn, 8, 2, 1, 2)
+        
+        group.setLayout(layout)
+        return group
+    
+    def on_ai_generate_and_execute(self):
+        """调用 AI 生成指令并开始执行（支持自动换行）"""
+        text = self.char_input.text().strip()
+        if not text:
+            QMessageBox.warning(self, "警告", "请输入要书写的汉字")
+            return
+
+        if not self.comm.is_connected():
+            QMessageBox.warning(self, "警告", "请先连接到设备")
+            return
+
+        api_key = self.apikey_input.text().strip()
+        if not api_key:
+            import os
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            if not api_key:
+                try:
+                    key_path = os.path.join(os.path.dirname(__file__), "apikey.txt")
+                    if os.path.exists(key_path):
+                        with open(key_path, "r") as f:
+                            api_key = f.readline().strip()
+                except Exception:
+                    pass
+        if not api_key:
+            QMessageBox.warning(self, "警告", "请配置 DeepSeek API Key")
+            return
+
+        self.api_key = api_key
+
+        font_size = self.font_size_input.value()
+        origin_x = self.ai_origin_x.value()
+        origin_y = self.ai_origin_y.value()
+        spacing = self.ai_spacing.value()
+        line_spacing = self.line_spacing_input.value()
+        speed = self.ai_speed_input.value()
+
+        # 同步工作区边界
+        self.workspace_x_max = self.workspace_x_input.value()
+        self.workspace_y_max = self.workspace_y_input.value()
+
+        use_wrap = self.auto_wrap_check.isChecked()
+        if use_wrap:
+            lines = self._wrap_text_lines(text, origin_x, origin_y,
+                                          font_size, spacing, line_spacing,
+                                          self.workspace_x_max)
+            if len(lines) > 1:
+                self.signal_emitter.log_message.emit(
+                    f"自动换行: {len(text)}字 → {len(lines)}行"
+                )
+            # 检查 Y 方向是否溢出工作区
+            last_line_y = origin_y + (len(lines) - 1) * (font_size + line_spacing)
+            if last_line_y + font_size > self.workspace_y_max:
+                self.signal_emitter.log_message.emit(
+                    f"⚠ 警告: 文字可能超出 Y 边界 (最后一行 Y={last_line_y:.0f}, "
+                    f"最大Y={self.workspace_y_max:.0f})"
+                )
+            self.ai_status_label.setText(f"正在生成「{text}」的书写指令({len(lines)}行)...")
+            self.signal_emitter.log_message.emit(
+                f"AI: 正在生成「{text}」的书写指令({len(lines)}行)..."
+            )
+            try:
+                resp = generate_via_api_multiline(
+                    lines, api_key,
+                    font_size=font_size, spacing=spacing,
+                    pen_up=15.0, pen_down=90.0, speed=speed,
+                    workspace_x=self.workspace_x_max
+                )
+            except Exception as e:
+                self.ai_status_label.setText("API调用失败")
+                self.signal_emitter.error_occurred.emit(f"AI API 调用失败: {e}")
+                return
+        else:
+            self.ai_status_label.setText(f"正在生成「{text}」的书写指令...")
+            self.signal_emitter.log_message.emit(f"AI: 正在生成「{text}」的书写指令...")
+            try:
+                resp = generate_via_api(
+                    text, api_key,
+                    font_size=font_size,
+                    origin_x=origin_x,
+                    origin_y=origin_y,
+                    spacing=spacing,
+                    speed=speed
+                )
+            except Exception as e:
+                self.ai_status_label.setText("API调用失败")
+                self.signal_emitter.error_occurred.emit(f"AI API 调用失败: {e}")
+                return
+
+        if not resp or not resp.instructions:
+            self.ai_status_label.setText("AI 未返回有效指令")
+            self.signal_emitter.error_occurred.emit("AI 未返回有效指令")
+            return
+
+        self.ai_queue.clear()
+        for item in resp.instructions:
+            self.ai_queue.append(item)
+
+        count = len(self.ai_queue)
+        self.ai_status_label.setText(f"共 {count} 条指令，开始执行...")
+        self.signal_emitter.log_message.emit(f"AI: 生成 {count} 条指令，开始执行")
+
+        self.ai_timer.start(200)
+    
+    def on_ai_stop(self):
+        """停止 AI 书写"""
+        self.ai_timer.stop()
+        self.ai_queue.clear()
+        self.ai_status_label.setText("已停止")
+        self.controller.stop()
+        self.controller.pen_up()
+        self.signal_emitter.log_message.emit("AI: 书写已停止")
+
+    # ===== 工作区边界检测 =====
+
+    def on_detect_boundary(self):
+        """启动边界检测：依次检测 X/Y 远端限位"""
+        if not self.comm.is_connected():
+            QMessageBox.warning(self, "警告", "请先连接到设备")
+            return
+
+        if self._boundary_step >= 0:
+            return
+
+        # 确保自动查询开启，否则状态机无法感知限位触发
+        self._auto_query_was_on = self.auto_query_check.isChecked()
+        if not self._auto_query_was_on:
+            self.auto_query_check.setChecked(True)
+            self.status_timer.start(STATUS_QUERY_INTERVAL_MS)
+            self.signal_emitter.log_message.emit("边界检测: 已自动开启状态轮询")
+
+        self._boundary_step = 0
+        self._last_known_y = self.controller.current_y
+        self._last_known_x = self.controller.current_x
+        self.signal_emitter.log_message.emit("边界检测: 正在向 X 远端移动...")
+        self.ai_status_label.setText("检测 X 边界...")
+        self.controller.move_abs(500.0, self.controller.current_y, 5)
+        self._boundary_timer.start(500)
+
+    def _boundary_detect_tick(self):
+        """边界检测状态机，由定时器驱动"""
+        status = self.controller.current_status
+
+        if self._boundary_step == 0:
+            if status == PlatformStatus.ERROR:
+                self._ws_x_max = self.controller.current_x
+                self.signal_emitter.log_message.emit(
+                    f"边界检测: X 远端 = {self._ws_x_max:.1f} mm"
+                )
+                self.controller.stop()
+                self._boundary_step = 1
+                self.controller.move_abs(10.0, self.controller.current_y, 5)
+            elif status == PlatformStatus.IDLE:
+                # 正常走完了500mm（没碰到限位）—— 以当前位置为界
+                self._ws_x_max = self.controller.current_x
+                self.signal_emitter.log_message.emit(
+                    f"边界检测: X 远端(无阻挡) = {self._ws_x_max:.1f} mm"
+                )
+                self._boundary_step = 2
+
+        elif self._boundary_step == 1:
+            if status == PlatformStatus.IDLE:
+                self._boundary_step = 2
+
+        elif self._boundary_step == 2:
+            self.ai_status_label.setText("检测 Y 边界...")
+            self.signal_emitter.log_message.emit("边界检测: 正在向 Y 远端移动...")
+            self.controller.move_abs(self.controller.current_x, 500.0, 5)
+            self._boundary_step = 3
+
+        elif self._boundary_step == 3:
+            if status == PlatformStatus.ERROR:
+                self._ws_y_max = self.controller.current_y
+                self.signal_emitter.log_message.emit(
+                    f"边界检测: Y 远端 = {self._ws_y_max:.1f} mm"
+                )
+                self.controller.stop()
+                self._boundary_step = 4
+                self.controller.move_abs(self.controller.current_x, 10.0, 5)
+            elif status == PlatformStatus.IDLE:
+                self._ws_y_max = self.controller.current_y
+                self.signal_emitter.log_message.emit(
+                    f"边界检测: Y 远端(无阻挡) = {self._ws_y_max:.1f} mm"
+                )
+                self._boundary_step = 5
+
+        elif self._boundary_step == 4:
+            if status == PlatformStatus.IDLE:
+                self._boundary_step = 5
+
+        elif self._boundary_step == 5:
+            self._boundary_timer.stop()
+            self._boundary_step = -1
+            # 恢复自动查询状态
+            if not self._auto_query_was_on:
+                self.auto_query_check.setChecked(False)
+                self.status_timer.stop()
+            # 回填 UI
+            self.workspace_x_input.setValue(self._ws_x_max)
+            self.workspace_y_input.setValue(self._ws_y_max)
+            self.workspace_x_max = self._ws_x_max
+            self.workspace_y_max = self._ws_y_max
+            self.ai_status_label.setText(
+                f"边界: X={self._ws_x_max:.0f} Y={self._ws_y_max:.0f} mm"
+            )
+            self.signal_emitter.log_message.emit(
+                f"边界检测完成: Xmax={self._ws_x_max:.1f} Ymax={self._ws_y_max:.1f}"
+            )
+
+    # ===== 自动换行辅助 =====
+
+    @staticmethod
+    def _wrap_text_lines(text: str, origin_x: float, origin_y: float,
+                         font_size: float, spacing: float, line_spacing: float,
+                         x_max: float) -> list:
+        """将文本按工作区宽度拆分为多行，返回 [(line_text, x_start, y_start), ...]"""
+        available_x = x_max - origin_x
+        if available_x <= 0:
+            available_x = font_size + spacing
+        chars_per_line = max(1, int(available_x / (font_size + spacing)))
+        lines = []
+        for i in range(0, len(text), chars_per_line):
+            line_text = text[i:i + chars_per_line]
+            line_y = origin_y + len(lines) * (font_size + line_spacing)
+            lines.append((line_text, origin_x, line_y))
+        return lines
+    
+    def _on_ai_tick(self):
+        """AI 指令队列定时执行"""
+        if not self.ai_queue:
+            self.ai_timer.stop()
+            self.ai_status_label.setText("执行完成")
+            self.signal_emitter.log_message.emit("AI: 所有指令执行完成")
+            return
+        
+        item = self.ai_queue.popleft()
+        action = item.get("action", "")
+        
+        try:
+            if action == "pen_up":
+                self.controller.pen_up()
+            elif action == "pen_down":
+                self.controller.pen_down()
+            elif action == "servo":
+                self.controller.servo(
+                    item.get("id", 1),
+                    float(item.get("angle", 90))
+                )
+            elif action == "move_abs":
+                self.controller.move_abs(
+                    float(item.get("x", 0)),
+                    float(item.get("y", 0)),
+                    int(item.get("speed", 5))
+                )
+            elif action == "move_rel":
+                self.controller.move_rel(
+                    float(item.get("dx", 0)),
+                    float(item.get("dy", 0)),
+                    int(item.get("speed", 5))
+                )
+            elif action == "line_interp":
+                self.controller.line_interp(
+                    float(item.get("x1", 0)),
+                    float(item.get("y1", 0)),
+                    float(item.get("x2", 0)),
+                    float(item.get("y2", 0)),
+                    int(item.get("speed", 3))
+                )
+            elif action == "arc_interp":
+                self.controller.arc_interp(
+                    float(item.get("xc", 0)),
+                    float(item.get("yc", 0)),
+                    float(item.get("radius", 10)),
+                    float(item.get("angle_start", 0)),
+                    float(item.get("angle_end", 90)),
+                    bool(item.get("clockwise", False)),
+                    int(item.get("speed", 3))
+                )
+            elif action == "home":
+                self.controller.home()
+            elif action == "stop":
+                self.controller.stop()
+            elif action == "delay":
+                pass  # 单纯等待一拍的指令，由定时器间隔提供
+            else:
+                self.signal_emitter.log_message.emit(f"AI: 未知指令类型 {action}，跳过")
+        except Exception as e:
+            self.signal_emitter.error_occurred.emit(f"AI 指令执行失败 [{action}]: {e}")
+        
+        remaining = len(self.ai_queue)
+        if remaining > 0 and remaining % 10 == 0:
+            self.ai_status_label.setText(f"剩余 {remaining} 条指令...")
     
     def closeEvent(self, event):
         """关闭事件"""

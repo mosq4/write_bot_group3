@@ -95,12 +95,15 @@ void Error_Handler(void);
 #define KEY2_GPIO_Port GPIOD
 #define KEY1_Pin GPIO_PIN_4
 #define KEY1_GPIO_Port GPIOD
+#define PEN_Pin GPIO_PIN_5
+#define PEN_GPIO_Port GPIOE
 #define SW1_Pin GPIO_PIN_1
 #define SW1_GPIO_Port GPIOE
 #define SW1_EXTI_IRQn EXTI1_IRQn
 
 /* USER CODE BEGIN Private defines */
-
+#define PEN_Pin GPIO_PIN_5
+#define PEN_GPIO_Port GPIOE
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

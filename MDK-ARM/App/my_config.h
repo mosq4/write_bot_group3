@@ -18,6 +18,7 @@
 #include "xkey.h"
 #include "xLinearModule.h"
 #include "XYplatform.h"
+#include "xpen.h"
 /* ------------------------------ Defines ------------------------------ */
 
 /* ------------------------------ Variable Declarations ------------------------------ */
@@ -25,6 +26,7 @@
 extern xkey::Key g_key[4];
 extern x_linear_module::LinearModule g_linearModule[2];
 extern xy_platform::XYplatform g_xyPlatform;
+extern xpen::Pen g_pen;
 
 
 /* ------------------------------ Typedef ------------------------------ */

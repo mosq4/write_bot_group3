@@ -19,6 +19,7 @@
 #include "tim.h"
 #include "xLinearModule.h"
 #include "xkey.h"
+#include "xpen.h"
 
 
 /* ------------------------------ Defines ------------------------------ */
@@ -49,6 +50,8 @@ x_linear_module::LinearModule g_linearModule[2] = {
         SW4_GPIO_Port, SW4_Pin, 4.0f)};
 
 xy_platform::XYplatform g_xyPlatform(&g_linearModule[0], &g_linearModule[1],0.1f,100.0f, 2.0f, 0.0f, 0.0f, 0.01f);
+
+xpen::Pen g_pen;
 
 
 /* ------------------------------ Functions ------------------------------ */

@@ -40,7 +40,6 @@ class DeepSeekClient:
         except Exception:
             pass
         return ""
-        self._requests = None
 
     def _ensure_requests(self):
         if self._requests is None:

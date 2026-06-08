@@ -16,6 +16,8 @@ class CommandType(IntEnum):
     ARC_INTERP = 0x05          # 圆弧插补
     STOP = 0x06                # 停止
     QUERY_STATUS = 0x07        # 查询状态
+    SERVO = 0x08               # 舵机控制
+    PEN = 0x09                 # 抬落笔
     STATUS_RESPONSE = 0xF0      # 状态响应
 
 
@@ -159,6 +161,27 @@ class CommandBuilder:
     def query_status() -> bytes:
         """构建状态查询命令"""
         return ProtocolFrame().pack(CommandType.QUERY_STATUS, b'')
+    
+    @staticmethod
+    def servo(servo_id: int, angle: float) -> bytes:
+        """构建舵机控制命令
+        
+        Args:
+            servo_id: 舵机ID (1~4)
+            angle: 角度 (0~180)
+        """
+        data = struct.pack('<Bf', servo_id, angle)
+        return ProtocolFrame().pack(CommandType.SERVO, data)
+    
+    @staticmethod
+    def pen_down() -> bytes:
+        """构建落笔命令"""
+        return ProtocolFrame().pack(CommandType.PEN, b'\x01')
+    
+    @staticmethod
+    def pen_up() -> bytes:
+        """构建抬笔命令"""
+        return ProtocolFrame().pack(CommandType.PEN, b'\x00')
 
 
 class ResponseParser:
