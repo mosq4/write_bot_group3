@@ -28,8 +28,6 @@ from protocol import (
     CommandBuilder, ResponseParser, CommandType, PlatformStatus, ProtocolFrame
 )
 from usb_comm import USBCommunicator
-from ai_instruction import generate_via_api, generate_via_api_multiline, build_prompt, AIResponse, write_request, read_response, clear_response
-from deepseek_client import DeepSeekClient
 
 logger = logging.getLogger(__name__)
 
@@ -281,12 +279,6 @@ class MainWindow(QMainWindow):
         self.status_timer = QTimer()
         self.status_timer.timeout.connect(self.on_query_status)
         
-        # AI 汉字书写：指令队列和定时器
-        self.ai_queue = deque()
-        self.ai_timer = QTimer()
-        self.ai_timer.timeout.connect(self._on_ai_tick)
-        self.api_key = ""
-
         # 工作区边界（mm），回零后由限位开关确定物理范围
         self.workspace_x_max = 300.0
         self.workspace_y_max = 300.0
@@ -659,9 +651,9 @@ class MainWindow(QMainWindow):
         plot_group.setLayout(plot_layout)
         layout.addWidget(plot_group, 2)
         
-        # AI 汉字书写面板
-        ai_group = self.create_ai_panel()
-        layout.addWidget(ai_group, 1)
+        # G-code 写字面板
+        gcode_group = self.create_gcode_panel()
+        layout.addWidget(gcode_group, 1)
         
         # 日志面板
         log_group = QGroupBox("日志")
@@ -839,15 +831,556 @@ class MainWindow(QMainWindow):
         else:
             self.status_timer.stop()
     
-    # ===== AI 汉字书写面板 =====
-    
-    def create_ai_panel(self) -> QGroupBox:
-        """创建 AI 汉字书写面板"""
-        group = QGroupBox("AI 汉字书写")
+    # ===== G-code 写字面板 =====
+
+    def create_gcode_panel(self) -> QGroupBox:
+        """创建 G-code 写字面板"""
+        group = QGroupBox("G-code 写字")
         layout = QGridLayout()
-        
-        # 输入汉字
-        layout.addWidget(QLabel("输入汉字:"), 0, 0)
+
+        layout.addWidget(QLabel("输入文字:"), 0, 0)
+        self.gcode_text_input = QTextEdit()
+        self.gcode_text_input.setMaximumHeight(60)
+        self.gcode_text_input.setPlaceholderText("请输入中文或英文...")
+        layout.addWidget(self.gcode_text_input, 0, 1, 1, 3)
+
+        layout.addWidget(QLabel("字号(mm):"), 1, 0)
+        self.gcode_text_size = QSpinBox()
+        self.gcode_text_size.setRange(5, 50)
+        self.gcode_text_size.setValue(15)
+        layout.addWidget(self.gcode_text_size, 1, 1)
+
+        layout.addWidget(QLabel("行宽(mm):"), 1, 2)
+        self.gcode_line_width = QSpinBox()
+        self.gcode_line_width.setRange(20, 300)
+        self.gcode_line_width.setValue(260)
+        layout.addWidget(self.gcode_line_width, 1, 3)
+
+        layout.addWidget(QLabel("速度:"), 2, 0)
+        self.gcode_speed_input = QSpinBox()
+        self.gcode_speed_input.setRange(50, 2000)
+        self.gcode_speed_input.setValue(600)
+        self.gcode_speed_input.setSingleStep(10)
+        layout.addWidget(self.gcode_speed_input, 2, 1)
+
+        layout.addWidget(QLabel("模式:"), 2, 2)
+        self.gcode_font_mode = QComboBox()
+        self.gcode_font_mode.addItem("正常字(中心线)", "normal")
+        self.gcode_font_mode.addItem("艺术字(轮廓)", "art")
+        layout.addWidget(self.gcode_font_mode, 2, 3)
+
+        self.gcode_status_label = QLabel("就绪")
+        self.gcode_status_label.setFont(QFont("Arial", 9))
+        layout.addWidget(self.gcode_status_label, 3, 0, 1, 2)
+
+        dl_btn = QPushButton("下载汉字库")
+        dl_btn.clicked.connect(self._on_download_hanzi_lib)
+        layout.addWidget(dl_btn, 3, 2, 1, 2)
+
+        gen_btn = QPushButton("生成G代码")
+        gen_btn.clicked.connect(self._on_generate_gcode)
+        layout.addWidget(gen_btn, 4, 0, 1, 2)
+
+        exec_btn = QPushButton("开始写字")
+        exec_btn.setStyleSheet("background-color: #BBDEFB;")
+        exec_btn.clicked.connect(self._on_start_writing)
+        layout.addWidget(exec_btn, 4, 2, 1, 2)
+
+        group.setLayout(layout)
+        return group
+
+    def _on_download_hanzi_lib(self):
+        """下载 Hanzi Writer Data 汉字库 all.json"""
+        lib_dir = os.path.join(os.path.dirname(__file__), "hanzi_gcode_tool", "hanzi_writer_data")
+        os.makedirs(lib_dir, exist_ok=True)
+        out_path = os.path.join(lib_dir, "all.json")
+        urls = [
+            "https://cdn.jsdelivr.net/npm/hanzi-writer-data@latest/all.json",
+            "https://raw.githubusercontent.com/chanind/hanzi-writer-data/master/all.json",
+        ]
+        self.gcode_status_label.setText("正在下载汉字库...")
+        self.signal_emitter.log_message.emit("G-code: 开始下载汉字库...")
+        last_err = None
+        for url in urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "XYPlatform/1.0"})
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    raw = resp.read()
+                data = json.loads(raw.decode("utf-8"))
+                if not isinstance(data, (dict, list)):
+                    raise ValueError("下载内容不是 JSON 字库")
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False)
+                count = len(data) if hasattr(data, "__len__") else 0
+                self.gcode_status_label.setText(f"汉字库: {count}字")
+                self.signal_emitter.log_message.emit(f"G-code: 汉字库下载完成 ({count}字)")
+                return
+            except Exception as e:
+                last_err = e
+        self.gcode_status_label.setText("下载失败")
+        self.signal_emitter.error_occurred.emit(f"G-code: 汉字库下载失败: {last_err}")
+        QMessageBox.warning(self, "下载失败", "无法下载汉字库 all.json，请检查网络连接")
+
+    def _text_to_polylines(self, text: str, text_size: int, font_mode: str = "normal") -> list:
+        cfg = GcodeConfig(
+            text=text,
+            height=float(text_size),
+            x0=0.0,
+            y0=0.0,
+            char_gap=max(2.0, float(text_size) * 0.20),
+            line_gap=max(4.0, float(text_size) * 0.40),
+            max_line_width=float(self.gcode_line_width.value()),
+            feed=float(self.gcode_speed_input.value()),
+            travel_feed=float(self.gcode_speed_input.value()) * 2,
+            curve_segments=6,
+            decimals=2,
+            use_z=False,
+            pen_on="M03 S500",
+            pen_off="M05 S0",
+            font_mode=font_mode,
+            hanzi_library_dir=os.path.join(os.path.dirname(__file__), "hanzi_gcode_tool", "hanzi_writer_data"),
+            auto_download_hanzi=True,
+        )
+        converter = HanziToGcode(cfg)
+        lines = converter.text_to_polylines()
+        self._last_external_hanzi_used = getattr(converter, "last_external_hanzi_used", 0)
+        self._last_external_hanzi_missing = getattr(converter, "last_external_hanzi_missing", 0)
+        return lines
+
+    @staticmethod
+    def _polyline_length(poly):
+        total = 0.0
+        for i in range(1, len(poly)):
+            total += math.hypot(poly[i][0] - poly[i - 1][0], poly[i][1] - poly[i - 1][1])
+        return total
+
+    def _normalize_polylines(self, polylines: list, margin: float = 5.0) -> list:
+        xs = [x for poly in polylines for x, _ in poly]
+        ys = [y for poly in polylines for _, y in poly]
+        if not xs or not ys:
+            return []
+        min_x, min_y = min(xs), min(ys)
+        dx = margin - min_x
+        dy = margin - min_y
+        return [[(x + dx, y + dy) for x, y in poly] for poly in polylines]
+
+    def _simplify_polylines(self, polylines: list, min_step: float = 0.35) -> list:
+        simplified = []
+        for poly in polylines:
+            if len(poly) < 2:
+                continue
+            new_poly = [poly[0]]
+            last_x, last_y = poly[0]
+            for x, y in poly[1:-1]:
+                if math.hypot(x - last_x, y - last_y) >= min_step:
+                    new_poly.append((x, y))
+                    last_x, last_y = x, y
+            if new_poly[-1] != poly[-1]:
+                new_poly.append(poly[-1])
+            if len(new_poly) >= 2:
+                simplified.append(new_poly)
+        return simplified
+
+    def _optimize_polylines(self, polylines: list) -> list:
+        cleaned = []
+        seen = set()
+        for poly in polylines:
+            pts = []
+            last = None
+            for x, y in poly:
+                if x is None or y is None:
+                    continue
+                pt = (float(x), float(y))
+                if last is None or math.hypot(pt[0] - last[0], pt[1] - last[1]) >= 0.08:
+                    pts.append(pt)
+                    last = pt
+            if len(pts) < 2:
+                continue
+            if self._polyline_length(pts) < 0.60:
+                continue
+            key_f = tuple((round(x, 1), round(y, 1)) for x, y in pts)
+            key_r = tuple(reversed(key_f))
+            key = min(key_f, key_r)
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(pts)
+        return cleaned
+
+    def _polylines_to_gcode(self, polylines: list, feedrate: int) -> list:
+        travel_feed = min(2000, max(feedrate, feedrate * 2))
+        lines = [
+            "; Generated by XY Platform G-code",
+            "; G1=line, G2/G3=arc interpolation",
+            "G21",
+            "G90",
+            "M05 S0",
+            f"G1 F{int(feedrate)}",
+        ]
+        arc_count = 0
+        line_count = 0
+        for poly in polylines:
+            if len(poly) < 2:
+                continue
+            sx, sy = poly[0]
+            lines.append(f"G0 X{sx:.2f} Y{sy:.2f} F{int(travel_feed)}")
+            lines.append("M03 S500")
+            lines.append(f"G1 F{int(feedrate)}")
+            sub_lines = self._polyline_to_gcode_with_arcs(poly, feedrate)
+            for ln in sub_lines:
+                if ln.startswith(("G2", "G3")):
+                    arc_count += 1
+                elif ln.startswith("G1"):
+                    line_count += 1
+                lines.append(ln)
+            lines.append("M05 S0")
+        lines.append("M05 S0")
+        self._last_gcode_arc_count = arc_count
+        self._last_gcode_line_count = line_count
+        return lines
+
+    def _polyline_to_gcode_with_arcs(self, poly: list, feedrate: int) -> list:
+        lines = []
+        n = len(poly)
+        if n < 2:
+            return lines
+        i = 0
+        tol = max(0.06, float(self.gcode_text_size.value()) * 0.010)
+        while i < n - 1:
+            best_j = -1
+            best_arc = None
+            max_j = min(n - 1, i + 28)
+            for j in range(i + 3, max_j + 1):
+                candidate = poly[i:j + 1]
+                arc = self._arc_from_points(candidate)
+                if arc is None:
+                    continue
+                if arc[4] <= tol:
+                    best_j = j
+                    best_arc = arc
+            if best_arc is not None and best_j > i + 2:
+                ux, uy, r, clockwise, _err, _sweep = best_arc
+                ex, ey = poly[best_j]
+                cmd = "G2" if clockwise else "G3"
+                ix = ux - poly[i][0]
+                jy = uy - poly[i][1]
+                lines.append(f"{cmd} X{ex:.2f} Y{ey:.2f} I{ix:.2f} J{jy:.2f}")
+                i = best_j
+            else:
+                x, y = poly[i + 1]
+                lines.append(f"G1 X{x:.2f} Y{y:.2f}")
+                i += 1
+        return lines
+
+    def _arc_from_points(self, pts: list):
+        if len(pts) < 3:
+            return None
+        p0 = pts[0]
+        pm = pts[len(pts) // 2]
+        p1 = pts[-1]
+        x1, y1 = p0
+        x2, y2 = pm
+        x3, y3 = p1
+        d = 2.0 * (x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2))
+        if abs(d) < 1e-6:
+            return None
+        ux = ((x1*x1 + y1*y1) * (y2 - y3) + (x2*x2 + y2*y2) * (y3 - y1) + (x3*x3 + y3*y3) * (y1 - y2)) / d
+        uy = ((x1*x1 + y1*y1) * (x3 - x2) + (x2*x2 + y2*y2) * (x1 - x3) + (x3*x3 + y3*y3) * (x2 - x1)) / d
+        r = math.hypot(x1 - ux, y1 - uy)
+        if r < 0.30 or r > 500.0:
+            return None
+        errors = [abs(math.hypot(x - ux, y - uy) - r) for x, y in pts]
+        max_error = max(errors) if errors else 0.0
+        cross = (x2 - x1) * (y3 - y2) - (y2 - y1) * (x3 - x2)
+        clockwise = cross < 0
+        a0 = math.degrees(math.atan2(y1 - uy, x1 - ux))
+        a1 = math.degrees(math.atan2(y3 - uy, x3 - ux))
+        if clockwise:
+            sweep = (a0 - a1) % 360.0
+        else:
+            sweep = (a1 - a0) % 360.0
+        if sweep < 10.0 or sweep > 185.0:
+            return None
+        return ux, uy, r, clockwise, max_error, sweep
+
+    def _on_generate_gcode(self):
+        """生成 G-code 并预览"""
+        text = self.gcode_text_input.toPlainText().strip()
+        if not text:
+            self.signal_emitter.log_message.emit("G-code: 请输入文字")
+            return
+
+        try:
+            text_size = self.gcode_text_size.value()
+            feedrate = self.gcode_speed_input.value()
+            font_mode = self.gcode_font_mode.currentData()
+
+            polylines = self._text_to_polylines(text, text_size, font_mode)
+            if not polylines:
+                self.signal_emitter.log_message.emit("G-code: 没有生成有效轨迹")
+                return
+
+            polylines = self._simplify_polylines(polylines, min_step=0.35)
+            polylines = self._optimize_polylines(polylines)
+            polylines = self._normalize_polylines(polylines, margin=5.0)
+            gcode_lines = self._polylines_to_gcode(polylines, feedrate)
+            self._last_gcode_text = "\n".join(gcode_lines) + "\n"
+
+            import os
+            file_path = os.path.join(os.path.dirname(__file__), "output.gcode.txt")
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(self._last_gcode_text)
+
+            self.canvas.clear_trajectory()
+            preview_x = []
+            preview_y = []
+            for poly in polylines:
+                for px, py in poly:
+                    preview_x.append(px)
+                    preview_y.append(py)
+                preview_x.append(None)
+                preview_y.append(None)
+            self.canvas.trajectory_x.extend(preview_x)
+            self.canvas.trajectory_y.extend(preview_y)
+            self.canvas.trajectory_line.set_data(
+                [v for v in self.canvas.trajectory_x if v is not None],
+                [v for v in self.canvas.trajectory_y if v is not None]
+            )
+            self.canvas.draw_idle()
+
+            mode_name = "艺术字" if font_mode == "art" else "正常字"
+            self.gcode_status_label.setText(
+                f"{len(polylines)}笔画 G2/G3={self._last_gcode_arc_count} G1={self._last_gcode_line_count}"
+            )
+            self.signal_emitter.log_message.emit(
+                f"G-code 已生成: {text} ({mode_name}) 笔画{len(polylines)}段 "
+                f"G2/G3={self._last_gcode_arc_count} G1={self._last_gcode_line_count}"
+            )
+            if font_mode != "art":
+                self.signal_emitter.log_message.emit(
+                    f"汉字库: 命中{self._last_external_hanzi_used}字 "
+                    f"缺字{self._last_external_hanzi_missing}字"
+                )
+        except Exception as e:
+            self.gcode_status_label.setText("生成失败")
+            self.signal_emitter.error_occurred.emit(f"G-code 生成失败: {e}")
+
+    def _on_start_writing(self):
+        """执行 G-code 写字"""
+        if not self._last_gcode_text:
+            self.signal_emitter.log_message.emit("G-code: 请先生成 G 代码")
+            return
+        if not self.comm.is_connected():
+            self.signal_emitter.log_message.emit("G-code: 请先连接设备")
+            return
+
+        self.writing_active = True
+        self.gcode_status_label.setText("写字中...")
+        self.signal_emitter.log_message.emit("G-code: 开始执行写字任务...")
+        finished = self._execute_gcode(self._last_gcode_text)
+        self.writing_active = False
+        if finished:
+            self.gcode_status_label.setText("完成")
+            self.signal_emitter.log_message.emit("G-code: 写字任务执行完成")
+        else:
+            self.gcode_status_label.setText("中断")
+            self.signal_emitter.log_message.emit("G-code: 写字任务中断")
+
+    def _on_stop_writing(self):
+        """停止 G-code 写字"""
+        if self.writing_active:
+            self.writing_active = False
+            self.controller.stop()
+            self.controller.pen_up()
+            self.gcode_status_label.setText("已停止")
+            self.signal_emitter.log_message.emit("G-code: 写字已停止")
+
+    def _execute_gcode(self, gcode_content: str) -> bool:
+        import re, time
+        from PyQt5.QtWidgets import QApplication
+
+        current_feedrate = 100.0
+        is_absolute_mode = True
+        current_x = self.controller.current_x
+        current_y = self.controller.current_y
+        pen_down = False
+        total_motion = 0
+
+        for raw_line in gcode_content.split('\n'):
+            QApplication.processEvents()
+            if not self.writing_active:
+                self.signal_emitter.log_message.emit("G-code: 任务已停止")
+                return False
+
+            line = raw_line.strip()
+            if not line or line.startswith(';'):
+                continue
+            if ';' in line:
+                line = line.split(';', 1)[0].strip()
+            if not line:
+                continue
+
+            line = re.sub(r'\([^)]*\)', '', line).upper()
+            tokens = re.findall(r'([A-Z])\s*([+-]?\d+(?:\.\d+)?)', line)
+            cmd_type = {}
+            for letter, number in tokens:
+                if letter in ('G', 'M'):
+                    code_int = int(float(number))
+                    if letter == 'G':
+                        cmd_type['cmd'] = f'G{code_int}'
+                    else:
+                        cmd_type['cmd'] = f'M{code_int:02d}'
+                elif letter in ('X', 'Y', 'I', 'J', 'R', 'F', 'S'):
+                    cmd_type[letter] = float(number)
+
+            if 'cmd' not in cmd_type:
+                continue
+
+            cmd = cmd_type['cmd']
+            if cmd in ('G0', 'G1', 'G2', 'G3'):
+                if 'F' in cmd_type:
+                    current_feedrate = max(1.0, cmd_type['F'])
+                target_x = current_x if 'X' not in cmd_type else (cmd_type['X'] if is_absolute_mode else current_x + cmd_type['X'])
+                target_y = current_y if 'Y' not in cmd_type else (cmd_type['Y'] if is_absolute_mode else current_y + cmd_type['Y'])
+
+                dist = math.hypot(target_x - current_x, target_y - current_y)
+                if dist < 0.01:
+                    current_x, current_y = target_x, target_y
+                    continue
+
+                move_speed = max(0.5, current_feedrate / 60.0)
+                total_motion += 1
+
+                if cmd in ('G2', 'G3'):
+                    if 'I' not in cmd_type or 'J' not in cmd_type:
+                        self.signal_emitter.log_message.emit("G-code: G2/G3 缺少 I/J，已停止")
+                        return False
+                    arc_points = self._expand_arc_points(current_x, current_y, target_x, target_y, cmd_type['I'], cmd_type['J'], clockwise=(cmd == 'G2'))
+                    if not arc_points:
+                        arc_points = [(target_x, target_y)]
+                    seg_x, seg_y = current_x, current_y
+                    for ax, ay in arc_points:
+                        QApplication.processEvents()
+                        if not self.writing_active:
+                            return False
+                        self.comm.send_data(CommandBuilder.line_interp(seg_x, seg_y, ax, ay, move_speed))
+                        if not self._wait_until_reached(ax, ay, move_speed):
+                            return False
+                        seg_x, seg_y = ax, ay
+                elif cmd == 'G0':
+                    self.comm.send_data(CommandBuilder.move_abs(target_x, target_y, int(move_speed)))
+                    if not self._wait_until_reached(target_x, target_y, move_speed):
+                        return False
+                else:
+                    self.comm.send_data(CommandBuilder.line_interp(current_x, current_y, target_x, target_y, move_speed))
+                    if not self._wait_until_reached(target_x, target_y, move_speed):
+                        return False
+
+                current_x = target_x
+                current_y = target_y
+            elif cmd == 'G21':
+                pass
+            elif cmd == 'G90':
+                is_absolute_mode = True
+            elif cmd == 'G91':
+                is_absolute_mode = False
+            elif cmd in ('M03', 'M3'):
+                pen_down = True
+                self.controller.pen_down()
+                self.signal_emitter.log_message.emit("→ 落笔")
+            elif cmd in ('M05', 'M5'):
+                pen_down = False
+                self.controller.pen_up()
+                self.signal_emitter.log_message.emit("→ 抬笔")
+
+        self.signal_emitter.log_message.emit(f"G-code 执行结束, 运动段数: {total_motion}")
+        return True
+
+    def _expand_arc_points(self, sx, sy, ex, ey, i_off, j_off, clockwise):
+        cx = sx + i_off
+        cy = sy + j_off
+        r0 = math.hypot(sx - cx, sy - cy)
+        r1 = math.hypot(ex - cx, ey - cy)
+        if r0 < 1e-6 or r1 < 1e-6:
+            return []
+        if abs(r0 - r1) > max(0.5, r0 * 0.08):
+            return []
+        radius = (r0 + r1) * 0.5
+        a0 = math.atan2(sy - cy, sx - cx)
+        a1 = math.atan2(ey - cy, ex - cx)
+        if clockwise:
+            while a1 >= a0:
+                a1 -= 2.0 * math.pi
+        else:
+            while a1 <= a0:
+                a1 += 2.0 * math.pi
+        sweep = a1 - a0
+        arc_len = abs(sweep) * radius
+        seg_len = max(0.45, min(1.20, float(self.gcode_text_size.value()) * 0.06))
+        n = max(2, min(96, int(math.ceil(arc_len / seg_len))))
+        pts = []
+        for k in range(1, n + 1):
+            a = a0 + sweep * k / n
+            pts.append((cx + radius * math.cos(a), cy + radius * math.sin(a)))
+        pts[-1] = (ex, ey)
+        return pts
+
+    def _wait_until_reached(self, target_x, target_y, speed):
+        import time
+        from PyQt5.QtWidgets import QApplication
+
+        target_x = float(target_x)
+        target_y = float(target_y)
+        speed = max(float(speed), 0.3)
+        dist = math.hypot(target_x - self.controller.current_x, target_y - self.controller.current_y)
+
+        close_tol = 0.45
+        idle_tol = 0.80
+        stable_required = 3
+        stable_count = 0
+        timeout = max(3.0, dist / speed * 2.2 + 4.0)
+        last_query = 0.0
+        start = time.time()
+
+        while time.time() - start < timeout:
+            QApplication.processEvents()
+            if not self.writing_active:
+                return False
+            now = time.time()
+            if self.comm.is_connected() and now - last_query >= 0.08:
+                self.controller.query_status()
+                last_query = now
+            QApplication.processEvents()
+            ex = abs(self.controller.current_x - target_x)
+            ey = abs(self.controller.current_y - target_y)
+            is_idle = self.controller.current_status == PlatformStatus.IDLE
+            if ex <= close_tol and ey <= close_tol:
+                stable_count += 1
+            elif is_idle and ex <= idle_tol and ey <= idle_tol:
+                stable_count += 1
+            else:
+                stable_count = 0
+            if stable_count >= stable_required:
+                return True
+            if self.controller.current_status == PlatformStatus.ERROR:
+                return False
+            time.sleep(0.025)
+
+        if self.comm.is_connected():
+            self.controller.query_status()
+            QApplication.processEvents()
+            time.sleep(0.08)
+            QApplication.processEvents()
+        ex = abs(self.controller.current_x - target_x)
+        ey = abs(self.controller.current_y - target_y)
+        return ex <= idle_tol and ey <= idle_tol
+
+    # ===== 工作区边界检测 =====
+
+    # ===== 工作区边界检测 =====
+
+    def on_detect_boundary(self):
+        """启动边界检测：依次检测 X/Y 远端限位"""
         self.char_input = QLineEdit()
         self.char_input.setPlaceholderText("请输入要书写的汉字...")
         layout.addWidget(self.char_input, 0, 1, 1, 3)
@@ -923,9 +1456,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.auto_wrap_check, 6, 2, 1, 2)
         
         # 状态标签
-        self.ai_status_label = QLabel("就绪")
-        self.ai_status_label.setFont(QFont("Arial", 9))
-        layout.addWidget(self.ai_status_label, 7, 0, 1, 4)
+        self.gcode_status_label = QLabel("就绪")
+        self.gcode_status_label.setFont(QFont("Arial", 9))
+        layout.addWidget(self.gcode_status_label, 7, 0, 1, 4)
         
         # 生成并执行按钮
         gen_btn = QPushButton("生成并执行")
@@ -998,7 +1531,7 @@ class MainWindow(QMainWindow):
                     f"⚠ 警告: 文字可能超出 Y 边界 (最后一行 Y={last_line_y:.0f}, "
                     f"最大Y={self.workspace_y_max:.0f})"
                 )
-            self.ai_status_label.setText(f"正在生成「{text}」的书写指令({len(lines)}行)...")
+            self.gcode_status_label.setText(f"正在生成「{text}」的书写指令({len(lines)}行)...")
             self.signal_emitter.log_message.emit(
                 f"AI: 正在生成「{text}」的书写指令({len(lines)}行)..."
             )
@@ -1010,11 +1543,11 @@ class MainWindow(QMainWindow):
                     workspace_x=self.workspace_x_max
                 )
             except Exception as e:
-                self.ai_status_label.setText("API调用失败")
+                self.gcode_status_label.setText("API调用失败")
                 self.signal_emitter.error_occurred.emit(f"AI API 调用失败: {e}")
                 return
         else:
-            self.ai_status_label.setText(f"正在生成「{text}」的书写指令...")
+            self.gcode_status_label.setText(f"正在生成「{text}」的书写指令...")
             self.signal_emitter.log_message.emit(f"AI: 正在生成「{text}」的书写指令...")
             try:
                 resp = generate_via_api(
@@ -1026,12 +1559,12 @@ class MainWindow(QMainWindow):
                     speed=speed
                 )
             except Exception as e:
-                self.ai_status_label.setText("API调用失败")
+                self.gcode_status_label.setText("API调用失败")
                 self.signal_emitter.error_occurred.emit(f"AI API 调用失败: {e}")
                 return
 
         if not resp or not resp.instructions:
-            self.ai_status_label.setText("AI 未返回有效指令")
+            self.gcode_status_label.setText("AI 未返回有效指令")
             self.signal_emitter.error_occurred.emit("AI 未返回有效指令")
             return
 
@@ -1040,7 +1573,7 @@ class MainWindow(QMainWindow):
             self.ai_queue.append(item)
 
         count = len(self.ai_queue)
-        self.ai_status_label.setText(f"共 {count} 条指令，开始执行...")
+        self.gcode_status_label.setText(f"共 {count} 条指令，开始执行...")
         self.signal_emitter.log_message.emit(f"AI: 生成 {count} 条指令，开始执行")
 
         self.ai_timer.start(200)
@@ -1049,7 +1582,7 @@ class MainWindow(QMainWindow):
         """停止 AI 书写"""
         self.ai_timer.stop()
         self.ai_queue.clear()
-        self.ai_status_label.setText("已停止")
+        self.gcode_status_label.setText("已停止")
         self.controller.stop()
         self.controller.pen_up()
         self.signal_emitter.log_message.emit("AI: 书写已停止")
@@ -1076,7 +1609,7 @@ class MainWindow(QMainWindow):
         self._last_known_y = self.controller.current_y
         self._last_known_x = self.controller.current_x
         self.signal_emitter.log_message.emit("边界检测: 正在向 X 远端移动...")
-        self.ai_status_label.setText("检测 X 边界...")
+        self.gcode_status_label.setText("检测 X 边界...")
         self.controller.move_abs(500.0, self.controller.current_y, 5)
         self._boundary_timer.start(500)
 
@@ -1106,7 +1639,7 @@ class MainWindow(QMainWindow):
                 self._boundary_step = 2
 
         elif self._boundary_step == 2:
-            self.ai_status_label.setText("检测 Y 边界...")
+            self.gcode_status_label.setText("检测 Y 边界...")
             self.signal_emitter.log_message.emit("边界检测: 正在向 Y 远端移动...")
             self.controller.move_abs(self.controller.current_x, 500.0, 5)
             self._boundary_step = 3
@@ -1143,7 +1676,7 @@ class MainWindow(QMainWindow):
             self.workspace_y_input.setValue(self._ws_y_max)
             self.workspace_x_max = self._ws_x_max
             self.workspace_y_max = self._ws_y_max
-            self.ai_status_label.setText(
+            self.gcode_status_label.setText(
                 f"边界: X={self._ws_x_max:.0f} Y={self._ws_y_max:.0f} mm"
             )
             self.signal_emitter.log_message.emit(
@@ -1172,7 +1705,7 @@ class MainWindow(QMainWindow):
         """AI 指令队列定时执行"""
         if not self.ai_queue:
             self.ai_timer.stop()
-            self.ai_status_label.setText("执行完成")
+            self.gcode_status_label.setText("执行完成")
             self.signal_emitter.log_message.emit("AI: 所有指令执行完成")
             return
         
@@ -1232,7 +1765,7 @@ class MainWindow(QMainWindow):
         
         remaining = len(self.ai_queue)
         if remaining > 0 and remaining % 10 == 0:
-            self.ai_status_label.setText(f"剩余 {remaining} 条指令...")
+            self.gcode_status_label.setText(f"剩余 {remaining} 条指令...")
     
     def closeEvent(self, event):
         """关闭事件"""
