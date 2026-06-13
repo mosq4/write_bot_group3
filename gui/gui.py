@@ -901,6 +901,10 @@ class MainWindow(QMainWindow):
         self.gcode_status_label.setFont(QFont("Arial", 9))
         layout.addWidget(self.gcode_status_label, 4, 0, 1, 2)
 
+        detect_btn = QPushButton("检测边界")
+        detect_btn.clicked.connect(self.on_detect_boundary)
+        layout.addWidget(detect_btn, 4, 2, 1, 2)
+
         gen_btn = QPushButton("生成G代码")
         gen_btn.clicked.connect(self._on_generate_gcode)
         layout.addWidget(gen_btn, 5, 0, 1, 2)
