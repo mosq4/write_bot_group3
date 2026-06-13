@@ -1232,6 +1232,8 @@ class MainWindow(QMainWindow):
     def _on_start_writing(self):
         """执行 G-code 写字"""
         try:
+            if self.writing_active:
+                return
             if not self._last_gcode_text:
                 self.signal_emitter.log_message.emit("G-code: 请先生成 G 代码")
                 return
@@ -1336,7 +1338,7 @@ class MainWindow(QMainWindow):
                     current_x, current_y = target_x, target_y
                     continue
 
-                move_speed = int(max(1, current_feedrate / 60.0))
+                move_speed = min(10, int(max(1, current_feedrate / 60.0)))
                 total_motion += 1
                 _dbg(f"  mot#{total_motion}: {cmd} ({current_x:.2f},{current_y:.2f})→({target_x:.2f},{target_y:.2f}) spd={move_speed}")
 
