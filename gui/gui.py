@@ -93,9 +93,13 @@ class XYPlotCanvas(FigureCanvas):
         self.draw_idle()
 
     def _apply_plot_bounds(self):
-        """统一固定 XY 位置图范围为 (-10, 300) * (-10, 300)。"""
+        """右下角为原点：X 向右, Y 向上"""
         self.ax.set_xlim(PLOT_X_MIN, PLOT_X_MAX)
-        self.ax.set_ylim(PLOT_Y_MIN, PLOT_Y_MAX)
+        self.ax.set_ylim(PLOT_Y_MAX, PLOT_Y_MIN)
+    
+    def _to_plot(self, x, y):
+        """物理坐标 → 绘图坐标（Y 翻转）"""
+        return x, PLOT_Y_MAX - y
     
     def _draw_workspace(self):
         """绘制工作区域"""
@@ -117,7 +121,8 @@ class XYPlotCanvas(FigureCanvas):
     
     def update_current_position(self, x: float, y: float):
         """更新当前位置"""
-        self.current_point.set_data([x], [y])
+        px, py = self._to_plot(x, y)
+        self.current_point.set_data([px], [py])
         
         # 添加到轨迹（跳过预览插入的 None 断点）
         last_x = None
@@ -135,7 +140,7 @@ class XYPlotCanvas(FigureCanvas):
             self.trajectory_y.append(y)
             self.trajectory_line.set_data(
                 [v for v in self.trajectory_x if v is not None],
-                [v for v in self.trajectory_y if v is not None]
+                [PLOT_Y_MAX - v for v in self.trajectory_y if v is not None]
             )
         
         self._apply_plot_bounds()
@@ -143,7 +148,8 @@ class XYPlotCanvas(FigureCanvas):
     
     def set_target_position(self, x: float, y: float):
         """更新目标位置"""
-        self.target_point.set_data([x], [y])
+        px, py = self._to_plot(x, y)
+        self.target_point.set_data([px], [py])
         self._apply_plot_bounds()
         self.draw_idle()
     
@@ -1010,7 +1016,7 @@ class MainWindow(QMainWindow):
                         continue
                     poly = []
                     for x, y in pts_raw:
-                        nx = char_cx + (x - _RAW_CENTER) * scale
+                        nx = char_cx - (x - _RAW_CENTER) * scale
                         ny = line_cy + (y - _RAW_CENTER) * scale
                         poly.append((nx, ny))
                     polylines.append(poly)
@@ -1276,6 +1282,16 @@ class MainWindow(QMainWindow):
         import re, time
         from PyQt5.QtWidgets import QApplication
 
+        debug_log = []
+        _dbg = lambda msg: debug_log.append(f"[{time.time():.3f}] {msg}")
+
+        def _flush_dbg():
+            try:
+                dp = os.path.join(os.path.dirname(__file__), "gcode_debug.log")
+                with open(dp, "w", encoding="utf-8") as f:
+                    f.write("\n".join(debug_log))
+            except: pass
+
         current_feedrate = 100.0
         is_absolute_mode = True
         current_x = self.controller.current_x
@@ -1286,7 +1302,8 @@ class MainWindow(QMainWindow):
         for raw_line in gcode_content.split('\n'):
             QApplication.processEvents()
             if not self.writing_active:
-                self.signal_emitter.log_message.emit("G-code: 任务已停止")
+                _dbg("STOPPED by user")
+                _flush_dbg()
                 return False
 
             line = raw_line.strip()
@@ -1314,6 +1331,8 @@ class MainWindow(QMainWindow):
                 continue
 
             cmd = cmd_type['cmd']
+            _dbg(f"CMD:{cmd} cur=({current_x:.2f},{current_y:.2f}) pen={pen_down}")
+
             if cmd in ('G0', 'G1', 'G2', 'G3'):
                 if 'F' in cmd_type:
                     current_feedrate = max(1.0, cmd_type['F'])
@@ -1327,10 +1346,12 @@ class MainWindow(QMainWindow):
 
                 move_speed = int(max(1, current_feedrate / 60.0))
                 total_motion += 1
+                _dbg(f"  mot#{total_motion}: {cmd} ({current_x:.2f},{current_y:.2f})→({target_x:.2f},{target_y:.2f}) spd={move_speed}")
 
                 if cmd in ('G2', 'G3'):
                     if 'I' not in cmd_type or 'J' not in cmd_type:
-                        self.signal_emitter.log_message.emit("G-code: G2/G3 缺少 I/J，已停止")
+                        _dbg("  FAIL: G2/G3 missing I/J")
+                        _flush_dbg()
                         return False
                     arc_points = self._expand_arc_points(current_x, current_y, target_x, target_y, cmd_type['I'], cmd_type['J'], clockwise=(cmd == 'G2'))
                     if not arc_points:
@@ -1339,18 +1360,31 @@ class MainWindow(QMainWindow):
                     for ax, ay in arc_points:
                         QApplication.processEvents()
                         if not self.writing_active:
+                            _flush_dbg()
                             return False
                         self.comm.send_data(CommandBuilder.line_interp(seg_x, seg_y, ax, ay, move_speed))
-                        if not self._wait_until_reached(ax, ay, move_speed):
+                        ok = self._wait_until_reached(ax, ay, move_speed)
+                        _dbg(f"  arc_seg ({seg_x:.2f},{seg_y:.2f})→({ax:.2f},{ay:.2f}) wait={'OK' if ok else 'FAIL'}")
+                        if not ok:
+                            _dbg(f"  pos_now=({self.controller.current_x:.2f},{self.controller.current_y:.2f}) st={self.controller.current_status}")
+                            _flush_dbg()
                             return False
                         seg_x, seg_y = ax, ay
                 elif cmd == 'G0':
                     self.comm.send_data(CommandBuilder.move_abs(target_x, target_y, int(move_speed)))
-                    if not self._wait_until_reached(target_x, target_y, move_speed):
+                    ok = self._wait_until_reached(target_x, target_y, move_speed)
+                    _dbg(f"  G0 wait={'OK' if ok else 'FAIL'}")
+                    if not ok:
+                        _dbg(f"  pos_now=({self.controller.current_x:.2f},{self.controller.current_y:.2f}) st={self.controller.current_status}")
+                        _flush_dbg()
                         return False
                 else:
                     self.comm.send_data(CommandBuilder.line_interp(current_x, current_y, target_x, target_y, move_speed))
-                    if not self._wait_until_reached(target_x, target_y, move_speed):
+                    ok = self._wait_until_reached(target_x, target_y, move_speed)
+                    _dbg(f"  G1 wait={'OK' if ok else 'FAIL'}")
+                    if not ok:
+                        _dbg(f"  pos_now=({self.controller.current_x:.2f},{self.controller.current_y:.2f}) st={self.controller.current_status}")
+                        _flush_dbg()
                         return False
 
                 current_x = target_x
@@ -1364,13 +1398,17 @@ class MainWindow(QMainWindow):
             elif cmd in ('M03', 'M3'):
                 pen_down = True
                 self.controller.pen_down()
+                _dbg(f"  PEN_DOWN")
                 self.signal_emitter.log_message.emit("→ 落笔")
                 import time; time.sleep(0.15)
             elif cmd in ('M05', 'M5'):
                 pen_down = False
                 self.controller.pen_up()
+                _dbg(f"  PEN_UP")
                 self.signal_emitter.log_message.emit("→ 抬笔")
 
+        _dbg(f"DONE: total_motions={total_motion}")
+        _flush_dbg()
         self.signal_emitter.log_message.emit(f"G-code 执行结束, 运动段数: {total_motion}")
         return True
 

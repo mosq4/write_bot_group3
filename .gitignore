@@ -11,5 +11,6 @@ __pycache__/
 gui/ai_request.txt
 gui/output.gcode.txt
 gui/crash.log
+gui/gcode_debug.log
 all.json
 gui/hanzi_gcode_tool/hanzi_writer_data/
