@@ -1205,8 +1205,10 @@ class MainWindow(QMainWindow):
         try:
             if action == "pen_up":
                 self.controller.pen_up()
+                import time; time.sleep(0.1)
             elif action == "pen_down":
                 self.controller.pen_down()
+                import time; time.sleep(0.1)
             elif action == "servo":
                 self.controller.servo(
                     item.get("id", 1),
