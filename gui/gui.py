@@ -762,8 +762,8 @@ class MainWindow(QMainWindow):
     
     def on_status_updated(self, status_info: dict):
         """状态更新"""
-        self.x_display.setText(f"{status_info['x']:.2f}")
-        self.y_display.setText(f"{status_info['y']:.2f}")
+        self.x_display.setText(f"{status_info['x']:.2f} mm")
+        self.y_display.setText(f"{status_info['y']:.2f} mm")
         
         # 更新图表
         self.canvas.update_current_position(status_info['x'], status_info['y'])
