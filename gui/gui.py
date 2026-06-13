@@ -993,10 +993,12 @@ class MainWindow(QMainWindow):
                     f"⚠ 警告: 文字可能超出 Y 边界 (最后一行 Y={last_line_y:.0f}, "
                     f"最大Y={self.workspace_y_max:.0f})"
                 )
-            self.ai_status_label.setText(f"正在生成「{text}」的书写指令({len(lines)}行)...")
+            self.ai_status_label.setText("AI 思考中...")
             self.signal_emitter.log_message.emit(
                 f"AI: 正在生成「{text}」的书写指令({len(lines)}行)..."
             )
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
             try:
                 resp = generate_via_api_multiline(
                     lines, api_key,
@@ -1009,8 +1011,10 @@ class MainWindow(QMainWindow):
                 self.signal_emitter.error_occurred.emit(f"AI API 调用失败: {e}")
                 return
         else:
-            self.ai_status_label.setText(f"正在生成「{text}」的书写指令...")
+            self.ai_status_label.setText("AI 思考中...")
             self.signal_emitter.log_message.emit(f"AI: 正在生成「{text}」的书写指令...")
+            from PyQt5.QtWidgets import QApplication
+            QApplication.processEvents()
             try:
                 resp = generate_via_api(
                     text, api_key,
