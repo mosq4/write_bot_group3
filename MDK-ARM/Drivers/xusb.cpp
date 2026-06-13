@@ -126,9 +126,7 @@ void usb_handle_command(uint8_t cmd, uint8_t *data, uint8_t data_len)
             break;
         
         case CMD_LINE_INTERP:
-            /* 直线插补: [x1(4B) y1(4B) x2(4B) y2(4B) speed(2B)]
-               注意：x1/y1 保留读取但不再使用，插补从当前实际位置开始，
-               避免"等待到达起始点"导致 G-code 逐段执行延迟叠加。 */
+            /* 直线插补: [x1(4B) y1(4B) x2(4B) y2(4B) speed(2B)] */
             if (data_len >= 18) {
                 float x1, y1, x2, y2;
                 memcpy(&x1, &data[0], 4);
@@ -136,8 +134,7 @@ void usb_handle_command(uint8_t cmd, uint8_t *data, uint8_t data_len)
                 memcpy(&x2, &data[8], 4);
                 memcpy(&y2, &data[12], 4);
                 memcpy(&speed_int, &data[16], 2);
-                (void)x1; (void)y1;
-                g_xyPlatform.LinearInterpolation(x2, y2,
+                g_xyPlatform.LinearInterpolation(x1, y1, x2, y2,
                                                  (float)speed_int,
                                                  g_xyPlatform.inter_step);
             }

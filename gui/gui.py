@@ -69,10 +69,8 @@ class XYPlotCanvas(FigureCanvas):
         
         # 初始化
         self._apply_plot_bounds()
-        # 强制 X/Y 等比例显示，避免窗口拉伸导致轨迹形变
         self.ax.set_aspect('equal', adjustable='box')
         
-        # 绘制工作区域边界
         self._draw_workspace()
         
         # 轨迹记录
@@ -93,13 +91,9 @@ class XYPlotCanvas(FigureCanvas):
         self.draw_idle()
 
     def _apply_plot_bounds(self):
-        """右下角为原点：X 向左, Y 向上"""
+        """右下角为原点"""
         self.ax.set_xlim(PLOT_X_MAX, PLOT_X_MIN)
-        self.ax.set_ylim(PLOT_Y_MAX, PLOT_Y_MIN)
-    
-    def _to_plot(self, x, y):
-        """物理坐标（右下原点，X向左，Y向上）→ 绘图坐标（左上原点，X向右，Y向下）"""
-        return PLOT_X_MAX - x, PLOT_Y_MAX - y
+        self.ax.set_ylim(PLOT_Y_MIN, PLOT_Y_MAX)
     
     def _draw_workspace(self):
         """绘制工作区域"""
@@ -121,8 +115,7 @@ class XYPlotCanvas(FigureCanvas):
     
     def update_current_position(self, x: float, y: float):
         """更新当前位置"""
-        px, py = self._to_plot(x, y)
-        self.current_point.set_data([px], [py])
+        self.current_point.set_data([x], [y])
         
         # 添加到轨迹（跳过预览插入的 None 断点）
         last_x = None
@@ -139,8 +132,8 @@ class XYPlotCanvas(FigureCanvas):
             self.trajectory_x.append(x)
             self.trajectory_y.append(y)
             self.trajectory_line.set_data(
-                [PLOT_X_MAX - v for v in self.trajectory_x if v is not None],
-                [PLOT_Y_MAX - v for v in self.trajectory_y if v is not None]
+                [v for v in self.trajectory_x if v is not None],
+                [v for v in self.trajectory_y if v is not None]
             )
         
         self._apply_plot_bounds()
@@ -148,8 +141,7 @@ class XYPlotCanvas(FigureCanvas):
     
     def set_target_position(self, x: float, y: float):
         """更新目标位置"""
-        px, py = self._to_plot(x, y)
-        self.target_point.set_data([px], [py])
+        self.target_point.set_data([x], [y])
         self._apply_plot_bounds()
         self.draw_idle()
     
@@ -896,11 +888,11 @@ class MainWindow(QMainWindow):
         self.gcode_origin_y.setValue(5)
         layout.addWidget(self.gcode_origin_y, 2, 3)
 
-        layout.addWidget(QLabel("速度:"), 3, 0)
+        layout.addWidget(QLabel("速度(mm/s):"), 3, 0)
         self.gcode_speed_input = QSpinBox()
-        self.gcode_speed_input.setRange(50, 2000)
-        self.gcode_speed_input.setValue(1200)
-        self.gcode_speed_input.setSingleStep(10)
+        self.gcode_speed_input.setRange(5, 30)
+        self.gcode_speed_input.setValue(10)
+        self.gcode_speed_input.setSingleStep(5)
         layout.addWidget(self.gcode_speed_input, 3, 1, 1, 3)
 
         self.gcode_status_label = QLabel("就绪")
@@ -1190,7 +1182,7 @@ class MainWindow(QMainWindow):
 
         try:
             text_size = self.gcode_text_size.value()
-            feedrate = self.gcode_speed_input.value()
+            feedrate = self.gcode_speed_input.value() * 60  # mm/s → mm/min
 
             polylines = self._text_to_polylines(text, text_size)
             if not polylines:
@@ -1400,12 +1392,13 @@ class MainWindow(QMainWindow):
                 self.controller.pen_down()
                 _dbg(f"  PEN_DOWN")
                 self.signal_emitter.log_message.emit("→ 落笔")
-                import time; time.sleep(0.15)
+                import time; time.sleep(0.02)
             elif cmd in ('M05', 'M5'):
                 pen_down = False
                 self.controller.pen_up()
                 _dbg(f"  PEN_UP")
                 self.signal_emitter.log_message.emit("→ 抬笔")
+                import time; time.sleep(0.02)
 
         _dbg(f"DONE: total_motions={total_motion}")
         _flush_dbg()
@@ -1450,11 +1443,11 @@ class MainWindow(QMainWindow):
         speed = max(float(speed), 0.3)
         dist = math.hypot(target_x - self.controller.current_x, target_y - self.controller.current_y)
 
-        close_tol = 0.45
-        idle_tol = 0.80
-        stable_required = 3
+        close_tol = 0.30
+        idle_tol = 0.50
+        stable_required = 2
         stable_count = 0
-        timeout = max(3.0, dist / speed * 2.2 + 4.0)
+        timeout = max(2.0, dist / speed * 1.5 + 2.0)
         last_query = 0.0
         start = time.time()
 
@@ -1463,7 +1456,7 @@ class MainWindow(QMainWindow):
             if not self.writing_active:
                 return False
             now = time.time()
-            if self.comm.is_connected() and now - last_query >= 0.2:
+            if self.comm.is_connected() and now - last_query >= 0.10:
                 self.controller.query_status()
                 last_query = now
             QApplication.processEvents()
@@ -1480,7 +1473,7 @@ class MainWindow(QMainWindow):
                 return True
             if self.controller.current_status == PlatformStatus.ERROR:
                 return False
-            time.sleep(0.05)
+            time.sleep(0.02)
 
         if self.comm.is_connected():
             self.controller.query_status()
