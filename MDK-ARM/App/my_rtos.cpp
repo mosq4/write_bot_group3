@@ -63,7 +63,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       if (g_xyPlatform.x->mode != x_linear_module::MODULE_MODE_POSITION)
       {
           g_xyPlatform.x->SetMode(x_linear_module::MODULE_MODE_POSITION);
-          g_xyPlatform.x->SetPosition(-10);
+          g_xyPlatform.x->SetPosition(-40);
           g_xyPlatform.x->SetTargetPosition(0);
           g_xyPlatform.x->SetTargetVelocityHard(0);
       }
@@ -86,7 +86,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
       if (g_xyPlatform.y->mode != x_linear_module::MODULE_MODE_POSITION)
       {
         g_xyPlatform.y->SetMode(x_linear_module::MODULE_MODE_POSITION);
-        g_xyPlatform.y->SetPosition(-10);
+        g_xyPlatform.y->SetPosition(-40);
         g_xyPlatform.y->SetTargetPosition(0);
         g_xyPlatform.y->SetTargetVelocityHard(0);
       }

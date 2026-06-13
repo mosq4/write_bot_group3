@@ -999,7 +999,7 @@ class MainWindow(QMainWindow):
         for l_idx, row in enumerate(final_lines):
             n = len(row)
             row_total = n * char_w + (n - 1) * spacing
-            x_start = origin_x + (max_width - row_total) / 2.0
+            x_start = origin_x
             line_cy = origin_y + l_idx * (text_size + line_gap) + text_size / 2.0
 
             for c_idx, g in enumerate(row):

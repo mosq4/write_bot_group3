@@ -8,8 +8,6 @@ MDK-ARM/XY_Platform_Motion_Control/
 __pycache__/
 *.pyc
 *.lst
-gui/apikey.txt
-gui/ai_response.json
 gui/ai_request.txt
 gui/output.gcode.txt
 gui/crash.log
