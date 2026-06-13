@@ -97,8 +97,23 @@ void XYplatform::MoveRelative(float dx, float dy, float vel) {
 }
 
 void XYplatform::LinearInterpolation(float x, float y, float vel, float step) {
-  // 从当前位置开始线性插补
-  this->LinearInterpolation(this->x_real, this->y_real, x, y, vel, step);
+  // 从当前位置直接开始插补，跳过 MoveTo+等待起点，避免状态机跳变
+  this->mode = PLATFORM_MODE_LINEAR_INTERPOLATION;
+  this->x->SetMode(x_linear_module::MODULE_MODE_POSITION);
+  this->y->SetMode(x_linear_module::MODULE_MODE_POSITION);
+
+  this->x_interpolation_start = this->x_real;
+  this->y_interpolation_start = this->y_real;
+  this->x_interpolation_target = this->x_real;
+  this->y_interpolation_target = this->y_real;
+  this->x_interpolation_final = x;
+  this->y_interpolation_final = y;
+  this->x_target = x;
+  this->y_target = y;
+
+  this->inter_vel = abs(vel);
+  this->inter_step = abs(step);
+  this->linear_waiting_start = false;
 }
 
 void XYplatform::LinearInterpolation(float x_start, float y_start, float x_end,float y_end, float vel, float step) {
