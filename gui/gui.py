@@ -93,13 +93,13 @@ class XYPlotCanvas(FigureCanvas):
         self.draw_idle()
 
     def _apply_plot_bounds(self):
-        """右下角为原点：X 向右, Y 向上"""
-        self.ax.set_xlim(PLOT_X_MIN, PLOT_X_MAX)
+        """右下角为原点：X 向左, Y 向上"""
+        self.ax.set_xlim(PLOT_X_MAX, PLOT_X_MIN)
         self.ax.set_ylim(PLOT_Y_MAX, PLOT_Y_MIN)
     
     def _to_plot(self, x, y):
-        """物理坐标 → 绘图坐标（Y 翻转）"""
-        return x, PLOT_Y_MAX - y
+        """物理坐标（右下原点，X向左，Y向上）→ 绘图坐标（左上原点，X向右，Y向下）"""
+        return PLOT_X_MAX - x, PLOT_Y_MAX - y
     
     def _draw_workspace(self):
         """绘制工作区域"""
@@ -139,7 +139,7 @@ class XYPlotCanvas(FigureCanvas):
             self.trajectory_x.append(x)
             self.trajectory_y.append(y)
             self.trajectory_line.set_data(
-                [v for v in self.trajectory_x if v is not None],
+                [PLOT_X_MAX - v for v in self.trajectory_x if v is not None],
                 [PLOT_Y_MAX - v for v in self.trajectory_y if v is not None]
             )
         
@@ -899,7 +899,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(QLabel("速度:"), 3, 0)
         self.gcode_speed_input = QSpinBox()
         self.gcode_speed_input.setRange(50, 2000)
-        self.gcode_speed_input.setValue(600)
+        self.gcode_speed_input.setValue(1200)
         self.gcode_speed_input.setSingleStep(10)
         layout.addWidget(self.gcode_speed_input, 3, 1, 1, 3)
 
@@ -1009,7 +1009,7 @@ class MainWindow(QMainWindow):
             line_cy = origin_y + l_idx * (text_size + line_gap) + text_size / 2.0
 
             for c_idx, g in enumerate(row):
-                char_cx = x_start + c_idx * (char_w + spacing) + char_w / 2.0
+                char_cx = x_start + (n - 1 - c_idx) * (char_w + spacing) + char_w / 2.0
                 for si in range(g["stroke_start"], g["stroke_end"]):
                     pts_raw = path.strokes[si].points
                     if len(pts_raw) < 2:
